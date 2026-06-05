@@ -463,6 +463,7 @@
   let currentSpecies = 'cat';
   let currentPet     = null;
   let roundPlan      = [];
+  let prefetchedRounds = [];
   let gameCode       = genCode();
   let isReplay       = false;
   let playerName     = sessionStorage.getItem('pg_name') || '';
@@ -634,7 +635,7 @@
         mapLoadingOv.classList.add('hidden');
         resolve();
       };
-      img.onerror = () => { loadingEl.textContent = 'Image failed. Retrying…'; mapLoadingOv.classList.add('hidden'); resolve(); };
+      img.onerror = () => { mapLoadingOv.classList.add('hidden'); reject(new Error('Image failed to load')); };
       img.src = url;
     });
   }
@@ -725,7 +726,37 @@
     throw new Error('All endpoints failed — check console for details');
   }
 
-  async function fetchRound(idx) {
+  async function prefetchGameData() {
+    const promises = roundPlan.map(async (plan, idx) => {
+      let attempts = 0;
+      while (attempts < 3) {
+        attempts++;
+        const taxon = plan.species === 'cat' ? 'Felis%20catus' : 'Canis%20lupus%20familiaris';
+        // If an attempt fails or returns an empty page, adding attempts shifts the page to guarantee a new try
+        const url   = `${INATURALIST}?taxon_name=${taxon}&has_photos=true&geoprivacy=open&per_page=200&page=${plan.page + attempts - 1}`;
+        try {
+          const data     = await apiFetch(url);
+          const validObs = (data.results || []).filter(o => o.location && o.photos?.length);
+          if (!validObs.length) {
+            console.warn(`Empty page for round ${idx+1}, attempt ${attempts}`);
+            continue;
+          }
+          const obs      = validObs[Math.floor(plan.pick * validObs.length) % validObs.length];
+          const imageUrl = obs.photos[0].url.replace('square','large').replace('medium','large');
+          const [lat, lng] = obs.location.split(',').map(Number);
+          return { species: plan.species, imageUrl, lat, lng };
+        } catch (err) {
+          console.warn(`Prefetch failed for round ${idx+1}, attempt ${attempts}:`, err);
+          if (attempts >= 3) throw err;
+          await sleep(2000);
+        }
+      }
+      throw new Error(`Failed to load round ${idx+1} data after 3 attempts.`);
+    });
+    prefetchedRounds = await Promise.all(promises);
+  }
+
+  async function loadRound(idx) {
     catCanvasEl.style.display = 'none';
     blurBadgeEl.classList.remove('visible');
     loadingEl.style.display = 'block';
@@ -733,30 +764,17 @@
     mapLoadingOv.classList.remove('hidden');
     submitBtn.disabled = true;
 
-    const plan = roundPlan[idx];
-    currentSpecies = plan.species;
-    const taxon = currentSpecies === 'cat' ? 'Felis%20catus' : 'Canis%20lupus%20familiaris';
-    const url   = `${INATURALIST}?taxon_name=${taxon}&has_photos=true&geoprivacy=open&per_page=200&page=${plan.page}`;
+    const roundData = prefetchedRounds[idx];
+    currentSpecies = roundData.species;
+    currentPet = { lat: roundData.lat, lng: roundData.lng };
 
     try {
-      const data     = await apiFetch(url);
-      const validObs = (data.results || []).filter(o => o.location && o.photos?.length);
-      if (!validObs.length) { loadingEl.textContent = 'Empty page. Retrying…'; return fetchRound(idx); }
-
-      const obs      = validObs[Math.floor(plan.pick * validObs.length) % validObs.length];
-      const imageUrl = obs.photos[0].url.replace('square','large').replace('medium','large');
-      const [lat, lng] = obs.location.split(',').map(Number);
-      currentPet = { lat, lng };
-
-      await renderPetWithBlur(imageUrl);
+      await renderPetWithBlur(roundData.imageUrl);
       submitBtn.disabled = false;
-
     } catch (err) {
-      console.error('fetchRound failed:', err);
-      // Show the real reason so the browser console gives actionable info
-      loadingEl.textContent = `Error (${err.message}). Retrying in 3 s…`;
-      mapLoadingOv.classList.add('hidden');
-      setTimeout(() => fetchRound(idx), 3000);
+      console.error('Image load failed:', err);
+      loadingEl.textContent = 'Failed to load image. Retrying in 3 s…';
+      setTimeout(() => loadRound(idx), 3000);
     }
   }
 
@@ -822,7 +840,7 @@
     currentRound++;
     roundEl.textContent = `${currentRound}/${MAX_ROUNDS}`;
     resetRound();
-    fetchRound(currentRound - 1);
+    loadRound(currentRound - 1);
   }
 
   function resetRound() {
@@ -871,7 +889,7 @@
   // ─────────────────────────────────────────────────────────────────────────
   // Start game
   // ─────────────────────────────────────────────────────────────────────────
-  startBtn.addEventListener('click', () => {
+  startBtn.addEventListener('click', async () => {
     const n = nameInputEl.value.trim();
     if (!n) return;
     playerName = n;
@@ -889,4 +907,57 @@
     // Build deterministic round sequence from the code
     roundPlan = buildRoundPlan(gameCode, gameMode);
 
-    score = 0; currentRou
+    const origText = startBtn.textContent;
+    startBtn.disabled = true;
+    startBtn.textContent = 'Loading Game Data...';
+
+    try {
+      await prefetchGameData();
+    } catch (err) {
+      alert(`Could not start game: ${err.message}`);
+      startBtn.disabled = false;
+      startBtn.textContent = origText;
+      return;
+    }
+
+    startBtn.disabled = false;
+    startBtn.textContent = origText;
+
+    score = 0; currentRound = 1;
+    scoreEl.textContent = '0';
+    roundEl.textContent = `1/${MAX_ROUNDS}`;
+    playerNameEl.textContent = `Playing as ${playerName}`;
+    hcodeEl.textContent = gameCode;
+
+    menuScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    gameScreen.classList.remove('hidden');
+
+    initMap();
+    setTimeout(() => map && map.invalidateSize(), 120);
+    resetRound();
+    loadRound(0);
+  });
+
+  function showMenu() {
+    endScreen.classList.add('hidden');
+    gameScreen.classList.add('hidden');
+    menuScreen.classList.remove('hidden');
+    renderAllLBs();
+  }
+
+  document.getElementById('restart-btn').addEventListener('click', showMenu);
+  document.getElementById('menu-btn').addEventListener('click', showMenu);
+  submitBtn.addEventListener('click', submitGuess);
+  nextBtn.addEventListener('click', nextRound);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Boot
+  // ─────────────────────────────────────────────────────────────────────────
+  setCode(genCode());
+  renderAllLBs();
+  loadFaceModel(); // loads in background while user fills name
+  showMenu();
+</script>
+</body>
+</html>
