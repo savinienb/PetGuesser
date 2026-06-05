@@ -678,36 +678,32 @@
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  function apiFetch(url) {
-    if (_pageCache.has(url)) return Promise.resolve(_pageCache.get(url));
+  async function apiFetch(url) {
+    // Return cached data if available
+    if (_pageCache.has(url)) return _pageCache.get(url);
 
-    return new Promise((resolve, reject) => {
-      // iNaturalist looks for a "callback" parameter to wrap the JSON response
-      const callbackName = 'inat_' + Math.random().toString(36).substr(2, 9);
-      const script = document.createElement('script');
-      
-      // Append the callback name to the URL
-      script.src = `${url}&callback=${callbackName}`;
-      
-      // Define the temporary global function that iNaturalist will trigger
-      window[callbackName] = (data) => {
-        _pageCache.set(url, data);
-        resolve(data);
-        cleanup();
-      };
-      
-      script.onerror = () => {
-        reject(new Error('JSONP request failed'));
-        cleanup();
-      };
-      
-      function cleanup() {
-        delete window[callbackName];
-        script.remove();
+    try {
+      // The iNaturalist API natively supports CORS, so standard fetch works perfectly
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
+
+      // Handle HTTP errors (like 429 Too Many Requests or 500 Server Error)
+      if (!response.ok) {
+        throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
       }
+
+      const data = await response.json();
+      _pageCache.set(url, data); // Cache the successful response
+      return data;
       
-      document.body.appendChild(script);
-    });
+    } catch (error) {
+      console.error('API Fetch failed:', error);
+      throw error; // This throws the error up to fetchRoundData to trigger your retry logic
+    }
   }
 
   async function fetchRoundData(plan, idx) {
