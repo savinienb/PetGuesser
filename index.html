@@ -764,14 +764,14 @@
 
       await renderPetWithBlur(roundData.imgElement);
       
-      // Start preloading the next one after 2.5s
+      // Start preloading the next one: always wait 2.5s before hitting the API
       if (idx + 1 < MAX_ROUNDS) {
-        setTimeout(() => {
-          if (!prefetchedRounds[idx + 1]) {
-            prefetchedRounds[idx + 1] = preloadRound(idx + 1);
-            prefetchedRounds[idx + 1].catch(() => {}); // prevent unhandled rejection
-          }
-        }, 2500);
+        if (!prefetchedRounds[idx + 1]) {
+          prefetchedRounds[idx + 1] = new Promise((resolve, reject) => {
+            sleep(2500).then(() => preloadRound(idx + 1)).then(resolve).catch(reject);
+          });
+          prefetchedRounds[idx + 1].catch(() => {}); // prevent unhandled rejection
+        }
       }
       
     } catch (err) {
