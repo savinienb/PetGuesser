@@ -472,6 +472,7 @@
   let polylineLine   = null;
   let map            = null;
   let faceModelReady = false;
+  let isImageLoaded  = false;
 
   // ─────────────────────────────────────────────────────────────────────────
   // DOM refs
@@ -585,59 +586,48 @@
     catch (e) { console.warn('Face model unavailable.', e); }
   }
 
-  async function renderPetWithBlur(url) {
-    return new Promise(resolve => {
-      const img = new Image();
-      // crossOrigin='anonymous' is required to draw to canvas without tainting it.
-      // iNaturalist/AWS S3 sends CORS headers, but only when the browser sends an
-      // Origin header (i.e. on HTTPS). On file:// there is no Origin so the
-      // attribute is ignored silently. On GitHub Pages (HTTPS) it is enforced.
-      img.crossOrigin = 'anonymous';
-      img.onload = async () => {
-        catCanvasEl.width  = img.naturalWidth;
-        catCanvasEl.height = img.naturalHeight;
-        const ctx = catCanvasEl.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        blurBadgeEl.classList.remove('visible');
+  async function renderPetWithBlur(img) {
+    catCanvasEl.width  = img.naturalWidth;
+    catCanvasEl.height = img.naturalHeight;
+    const ctx = catCanvasEl.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    blurBadgeEl.classList.remove('visible');
 
-        if (faceModelReady && typeof faceapi !== 'undefined') {
-          try {
-            const DET = 640, sc = Math.min(1, DET / Math.max(img.naturalWidth, img.naturalHeight));
-            const dw = Math.round(img.naturalWidth * sc), dh = Math.round(img.naturalHeight * sc);
-            const det = document.createElement('canvas');
-            det.width = dw; det.height = dh;
-            det.getContext('2d').drawImage(img, 0, 0, dw, dh);
+    if (faceModelReady && typeof faceapi !== 'undefined') {
+      try {
+        const DET = 640, sc = Math.min(1, DET / Math.max(img.naturalWidth, img.naturalHeight));
+        const dw = Math.round(img.naturalWidth * sc), dh = Math.round(img.naturalHeight * sc);
+        const det = document.createElement('canvas');
+        det.width = dw; det.height = dh;
+        det.getContext('2d').drawImage(img, 0, 0, dw, dh);
 
-            const faces = await faceapi.detectAllFaces(det, new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: .45 }));
-            if (faces.length) {
-              blurBadgeEl.classList.add('visible');
-              for (const f of faces) {
-                const pad = .28;
-                const fx = f.box.x/sc, fy = f.box.y/sc, fw = f.box.width/sc, fh = f.box.height/sc;
-                const bx = Math.max(0, fx - fw*pad), by = Math.max(0, fy - fh*pad);
-                const bw = Math.min(catCanvasEl.width  - bx, fw*(1+2*pad));
-                const bh = Math.min(catCanvasEl.height - by, fh*(1+2*pad));
-                const S = .05;
-                const tmp = document.createElement('canvas');
-                tmp.width = Math.max(1, Math.round(bw*S)); tmp.height = Math.max(1, Math.round(bh*S));
-                tmp.getContext('2d').drawImage(catCanvasEl, bx, by, bw, bh, 0, 0, tmp.width, tmp.height);
-                ctx.imageSmoothingEnabled = false;
-                ctx.drawImage(tmp, 0, 0, tmp.width, tmp.height, bx, by, bw, bh);
-                ctx.imageSmoothingEnabled = true;
-                ctx.filter = 'blur(14px)'; ctx.drawImage(catCanvasEl, bx, by, bw, bh, bx, by, bw, bh); ctx.filter = 'none';
-              }
-            }
-          } catch (e) { console.warn('Face detection:', e); }
+        const faces = await faceapi.detectAllFaces(det, new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: .45 }));
+        if (faces.length) {
+          blurBadgeEl.classList.add('visible');
+          for (const f of faces) {
+            const pad = .28;
+            const fx = f.box.x/sc, fy = f.box.y/sc, fw = f.box.width/sc, fh = f.box.height/sc;
+            const bx = Math.max(0, fx - fw*pad), by = Math.max(0, fy - fh*pad);
+            const bw = Math.min(catCanvasEl.width  - bx, fw*(1+2*pad));
+            const bh = Math.min(catCanvasEl.height - by, fh*(1+2*pad));
+            const S = .05;
+            const tmp = document.createElement('canvas');
+            tmp.width = Math.max(1, Math.round(bw*S)); tmp.height = Math.max(1, Math.round(bh*S));
+            tmp.getContext('2d').drawImage(catCanvasEl, bx, by, bw, bh, 0, 0, tmp.width, tmp.height);
+            ctx.imageSmoothingEnabled = false;
+            ctx.drawImage(tmp, 0, 0, tmp.width, tmp.height, bx, by, bw, bh);
+            ctx.imageSmoothingEnabled = true;
+            ctx.filter = 'blur(14px)'; ctx.drawImage(catCanvasEl, bx, by, bw, bh, bx, by, bw, bh); ctx.filter = 'none';
+          }
         }
+      } catch (e) { console.warn('Face detection:', e); }
+    }
 
-        loadingEl.style.display   = 'none';
-        catCanvasEl.style.display = 'block';
-        mapLoadingOv.classList.add('hidden');
-        resolve();
-      };
-      img.onerror = () => { mapLoadingOv.classList.add('hidden'); reject(new Error('Image failed to load')); };
-      img.src = url;
-    });
+    loadingEl.style.display   = 'none';
+    catCanvasEl.style.display = 'block';
+    mapLoadingOv.classList.add('hidden');
+    isImageLoaded = true;
+    if (userMarker) submitBtn.disabled = false;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -664,7 +654,7 @@
     if (!nextBtn.classList.contains('hidden')) return;
     if (userMarker) userMarker.setLatLng(e.latlng);
     else userMarker = L.marker(e.latlng).addTo(map);
-    submitBtn.disabled = false;
+    if (isImageLoaded) submitBtn.disabled = false;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -706,68 +696,57 @@
     }
   }
 
-  async function fetchRoundData(plan, idx) {
-    let attempts = 0;
-    while (attempts < 3) {
-      attempts++;
-      const taxon = plan.species === 'cat' ? 'Felis%20catus' : 'Canis%20lupus%20familiaris';
-      // If an attempt fails or returns an empty page, adding attempts shifts the page to guarantee a new try
-      const url   = `${INATURALIST}?taxon_name=${taxon}&has_photos=true&geoprivacy=open&per_page=200&page=${plan.page + attempts - 1}`;
+  async function preloadImage(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('Image failed to preload'));
+      img.src = url;
+    });
+  }
+
+  async function preloadRound(idx) {
+    if (idx >= MAX_ROUNDS) return;
+    
+    let pageOffset = 0;
+    while (pageOffset < 5) {
       try {
+        const plan = roundPlan[idx];
+        const taxon = plan.species === 'cat' ? 'Felis%20catus' : 'Canis%20lupus%20familiaris';
+        const url   = `${INATURALIST}?taxon_name=${taxon}&has_photos=true&geoprivacy=open&per_page=200&page=${plan.page + pageOffset}`;
+        
         const data     = await apiFetch(url);
         const validObs = (data.results || []).filter(o => o.location && o.photos?.length);
         if (!validObs.length) {
-          console.warn(`Empty page for round ${idx+1}, attempt ${attempts}`);
+          pageOffset++;
           continue;
         }
+        
         const obs      = validObs[Math.floor(plan.pick * validObs.length) % validObs.length];
         const imageUrl = obs.photos[0].url.replace('square','large').replace('medium','large');
         const [lat, lng] = obs.location.split(',').map(Number);
-        return { species: plan.species, imageUrl, lat, lng };
+        
+        const roundData = { species: plan.species, imageUrl, lat, lng };
+        roundData.imgElement = await preloadImage(roundData.imageUrl);
+        return roundData;
       } catch (err) {
-        console.warn(`Prefetch failed for round ${idx+1}, attempt ${attempts}:`, err);
-        if (attempts >= 3) throw err;
-        await sleep(2000);
+        console.warn(`Preload failed for round ${idx+1}, offset ${pageOffset}:`, err);
+        pageOffset++;
+        await sleep(1000);
       }
     }
-    throw new Error(`Failed to load round ${idx+1} data after 3 attempts.`);
+    throw new Error(`Failed to preload round ${idx+1}`);
   }
 
   async function prefetchGameData() {
-    let deferreds = [];
-    prefetchedRounds = roundPlan.map((plan, idx) => {
-      let resolve, reject;
-      const p = new Promise((res, rej) => { resolve = res; reject = rej; });
-      p.catch(() => {}); // Prevent unhandled promise rejection warnings in console
-      deferreds.push({ resolve, reject });
-      return p;
-    });
-
-    // 1. Fetch first round and block until it's ready
-    try {
-      const firstData = await fetchRoundData(roundPlan[0], 0);
-      deferreds[0].resolve(firstData);
-    } catch (err) {
-      deferreds[0].reject(err);
-      throw err; // Stop game from starting
-    }
-
-    // 2. Fetch the rest sequentially in the background
-    // iNaturalist enforces strict rate limits. Making 5 parallel requests often triggers a 403 block.
-    (async () => {
-      for (let i = 1; i < MAX_ROUNDS; i++) {
-        await sleep(2500); // 1.2s delay between requests
-        try {
-          const data = await fetchRoundData(roundPlan[i], i);
-          deferreds[i].resolve(data);
-        } catch (err) {
-          deferreds[i].reject(err);
-        }
-      }
-    })();
+    prefetchedRounds = [];
+    prefetchedRounds[0] = preloadRound(0);
+    await prefetchedRounds[0]; // Wait only for the first round before starting
   }
 
   async function loadRound(idx) {
+    isImageLoaded = false;
     catCanvasEl.style.display = 'none';
     blurBadgeEl.classList.remove('visible');
     loadingEl.style.display = 'block';
@@ -776,17 +755,29 @@
     submitBtn.disabled = true;
 
     try {
+      if (!prefetchedRounds[idx]) {
+        prefetchedRounds[idx] = preloadRound(idx);
+      }
       const roundData = await prefetchedRounds[idx];
       currentSpecies = roundData.species;
       currentPet = { lat: roundData.lat, lng: roundData.lng };
 
-      await renderPetWithBlur(roundData.imageUrl);
-      submitBtn.disabled = false;
+      await renderPetWithBlur(roundData.imgElement);
+      
+      // Start preloading the next one after 2.5s
+      if (idx + 1 < MAX_ROUNDS) {
+        setTimeout(() => {
+          if (!prefetchedRounds[idx + 1]) {
+            prefetchedRounds[idx + 1] = preloadRound(idx + 1);
+            prefetchedRounds[idx + 1].catch(() => {}); // prevent unhandled rejection
+          }
+        }, 2500);
+      }
+      
     } catch (err) {
       console.error('Round load failed:', err);
       loadingEl.textContent = 'Failed to load round. Retrying in 3 s…';
-      prefetchedRounds[idx] = fetchRoundData(roundPlan[idx], idx);
-      prefetchedRounds[idx].catch(() => {});
+      prefetchedRounds[idx] = null; // clear the failed promise to fetch a new one next time
       setTimeout(() => loadRound(idx), 3000);
     }
   }
@@ -857,6 +848,7 @@
   }
 
   function resetRound() {
+    isImageLoaded = false;
     resultOverlay.classList.add('hidden');
     mapContainer.classList.remove('expanded');
     submitBtn.classList.remove('hidden');
