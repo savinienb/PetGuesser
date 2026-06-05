@@ -726,34 +726,40 @@
     throw new Error('All endpoints failed — check console for details');
   }
 
-  async function prefetchGameData() {
-    const promises = roundPlan.map(async (plan, idx) => {
-      let attempts = 0;
-      while (attempts < 3) {
-        attempts++;
-        const taxon = plan.species === 'cat' ? 'Felis%20catus' : 'Canis%20lupus%20familiaris';
-        // If an attempt fails or returns an empty page, adding attempts shifts the page to guarantee a new try
-        const url   = `${INATURALIST}?taxon_name=${taxon}&has_photos=true&geoprivacy=open&per_page=200&page=${plan.page + attempts - 1}`;
-        try {
-          const data     = await apiFetch(url);
-          const validObs = (data.results || []).filter(o => o.location && o.photos?.length);
-          if (!validObs.length) {
-            console.warn(`Empty page for round ${idx+1}, attempt ${attempts}`);
-            continue;
-          }
-          const obs      = validObs[Math.floor(plan.pick * validObs.length) % validObs.length];
-          const imageUrl = obs.photos[0].url.replace('square','large').replace('medium','large');
-          const [lat, lng] = obs.location.split(',').map(Number);
-          return { species: plan.species, imageUrl, lat, lng };
-        } catch (err) {
-          console.warn(`Prefetch failed for round ${idx+1}, attempt ${attempts}:`, err);
-          if (attempts >= 3) throw err;
-          await sleep(2000);
+  async function fetchRoundData(plan, idx) {
+    let attempts = 0;
+    while (attempts < 3) {
+      attempts++;
+      const taxon = plan.species === 'cat' ? 'Felis%20catus' : 'Canis%20lupus%20familiaris';
+      // If an attempt fails or returns an empty page, adding attempts shifts the page to guarantee a new try
+      const url   = `${INATURALIST}?taxon_name=${taxon}&has_photos=true&geoprivacy=open&per_page=200&page=${plan.page + attempts - 1}`;
+      try {
+        const data     = await apiFetch(url);
+        const validObs = (data.results || []).filter(o => o.location && o.photos?.length);
+        if (!validObs.length) {
+          console.warn(`Empty page for round ${idx+1}, attempt ${attempts}`);
+          continue;
         }
+        const obs      = validObs[Math.floor(plan.pick * validObs.length) % validObs.length];
+        const imageUrl = obs.photos[0].url.replace('square','large').replace('medium','large');
+        const [lat, lng] = obs.location.split(',').map(Number);
+        return { species: plan.species, imageUrl, lat, lng };
+      } catch (err) {
+        console.warn(`Prefetch failed for round ${idx+1}, attempt ${attempts}:`, err);
+        if (attempts >= 3) throw err;
+        await sleep(2000);
       }
-      throw new Error(`Failed to load round ${idx+1} data after 3 attempts.`);
+    }
+    throw new Error(`Failed to load round ${idx+1} data after 3 attempts.`);
+  }
+
+  async function prefetchGameData() {
+    prefetchedRounds = roundPlan.map((plan, idx) => {
+      const p = fetchRoundData(plan, idx);
+      p.catch(() => {}); // Prevent unhandled promise rejection warnings in console
+      return p;
     });
-    prefetchedRounds = await Promise.all(promises);
+    await prefetchedRounds[0]; // Wait only for the first round before starting
   }
 
   async function loadRound(idx) {
@@ -764,16 +770,18 @@
     mapLoadingOv.classList.remove('hidden');
     submitBtn.disabled = true;
 
-    const roundData = prefetchedRounds[idx];
-    currentSpecies = roundData.species;
-    currentPet = { lat: roundData.lat, lng: roundData.lng };
-
     try {
+      const roundData = await prefetchedRounds[idx];
+      currentSpecies = roundData.species;
+      currentPet = { lat: roundData.lat, lng: roundData.lng };
+
       await renderPetWithBlur(roundData.imageUrl);
       submitBtn.disabled = false;
     } catch (err) {
-      console.error('Image load failed:', err);
-      loadingEl.textContent = 'Failed to load image. Retrying in 3 s…';
+      console.error('Round load failed:', err);
+      loadingEl.textContent = 'Failed to load round. Retrying in 3 s…';
+      prefetchedRounds[idx] = fetchRoundData(roundPlan[idx], idx);
+      prefetchedRounds[idx].catch(() => {});
       setTimeout(() => loadRound(idx), 3000);
     }
   }
