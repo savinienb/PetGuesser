@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet" />
-  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <!-- face-api.js loaded at bottom of body to avoid render-blocking -->
 
   <style>
     /* ── Tokens ─────────────────────────────────────────────────────────── */
@@ -382,6 +382,8 @@
 
 </div>
 
+<!-- face-api.js: non-blocking here; main script's loadFaceModel() retries if not ready yet -->
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script>
   // ─────────────────────────────────────────────────────────────────────────
@@ -585,6 +587,10 @@
   async function renderPetWithBlur(url) {
     return new Promise(resolve => {
       const img = new Image();
+      // crossOrigin='anonymous' is required to draw to canvas without tainting it.
+      // iNaturalist/AWS S3 sends CORS headers, but only when the browser sends an
+      // Origin header (i.e. on HTTPS). On file:// there is no Origin so the
+      // attribute is ignored silently. On GitHub Pages (HTTPS) it is enforced.
       img.crossOrigin = 'anonymous';
       img.onload = async () => {
         catCanvasEl.width  = img.naturalWidth;
@@ -593,7 +599,7 @@
         ctx.drawImage(img, 0, 0);
         blurBadgeEl.classList.remove('visible');
 
-        if (faceModelReady) {
+        if (faceModelReady && typeof faceapi !== 'undefined') {
           try {
             const DET = 640, sc = Math.min(1, DET / Math.max(img.naturalWidth, img.naturalHeight));
             const dw = Math.round(img.naturalWidth * sc), dh = Math.round(img.naturalHeight * sc);
@@ -662,7 +668,29 @@
 
   // ─────────────────────────────────────────────────────────────────────────
   // Fetch — uses the seeded round plan for deterministic sequences
+  // CORS proxy is used as fallback when the direct iNaturalist call fails
+  // (common on GitHub Pages where the deploy origin may be rate-limited).
   // ─────────────────────────────────────────────────────────────────────────
+  const INATURALIST = 'https://api.inaturalist.org/v1/observations';
+  const CORS_PROXY  = 'https://corsproxy.io/?url=';
+
+  async function apiFetch(url) {
+    // 1st attempt: direct
+    try {
+      const r = await fetch(url, { mode: 'cors', credentials: 'omit' });
+      if (r.ok) return r.json();
+      // HTTP error (e.g. 429 rate-limit, 503) — try proxy before giving up
+      console.warn(`iNaturalist direct: HTTP ${r.status}. Trying proxy…`);
+    } catch (e) {
+      console.warn('iNaturalist direct fetch failed:', e.message, '— trying proxy…');
+    }
+    // 2nd attempt: via CORS proxy
+    const proxyUrl = CORS_PROXY + encodeURIComponent(url);
+    const r2 = await fetch(proxyUrl, { credentials: 'omit' });
+    if (!r2.ok) throw new Error(`Proxy returned HTTP ${r2.status}`);
+    return r2.json();
+  }
+
   async function fetchRound(idx) {
     catCanvasEl.style.display = 'none';
     blurBadgeEl.classList.remove('visible');
@@ -674,11 +702,11 @@
     const plan = roundPlan[idx];
     currentSpecies = plan.species;
     const taxon = currentSpecies === 'cat' ? 'Felis%20catus' : 'Canis%20lupus%20familiaris';
-    const url   = `https://api.inaturalist.org/v1/observations?taxon_name=${taxon}&has_photos=true&geoprivacy=open&per_page=200&page=${plan.page}`;
+    const url   = `${INATURALIST}?taxon_name=${taxon}&has_photos=true&geoprivacy=open&per_page=200&page=${plan.page}`;
 
     try {
-      const data     = await fetch(url).then(r => r.json());
-      const validObs = data.results.filter(o => o.location && o.photos?.length);
+      const data     = await apiFetch(url);
+      const validObs = (data.results || []).filter(o => o.location && o.photos?.length);
       if (!validObs.length) { loadingEl.textContent = 'Empty page. Retrying…'; return fetchRound(idx); }
 
       const obs      = validObs[Math.floor(plan.pick * validObs.length) % validObs.length];
@@ -690,10 +718,11 @@
       submitBtn.disabled = false;
 
     } catch (err) {
-      console.error('Fetch error:', err);
-      loadingEl.textContent = 'Network error. Retrying…';
+      console.error('fetchRound failed:', err);
+      // Show the real reason so the browser console gives actionable info
+      loadingEl.textContent = `Error (${err.message}). Retrying in 3 s…`;
       mapLoadingOv.classList.add('hidden');
-      setTimeout(() => fetchRound(idx), 2000);
+      setTimeout(() => fetchRound(idx), 3000);
     }
   }
 
