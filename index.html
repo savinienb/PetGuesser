@@ -668,27 +668,61 @@
 
   // ─────────────────────────────────────────────────────────────────────────
   // Fetch — uses the seeded round plan for deterministic sequences
-  // CORS proxy is used as fallback when the direct iNaturalist call fails
-  // (common on GitHub Pages where the deploy origin may be rate-limited).
+  // Falls through a waterfall of proxies so a single bad proxy can't break
+  // the game. An in-memory cache avoids re-hitting the API on retry.
   // ─────────────────────────────────────────────────────────────────────────
   const INATURALIST = 'https://api.inaturalist.org/v1/observations';
-  const CORS_PROXY  = 'https://corsproxy.io/?url=';
+
+  // Ordered list of proxy wrappers. Each takes the target URL and returns a
+  // full URL to fetch. We try them in order, skipping any that error or
+  // return a non-ok status. Add more entries here if needed.
+  const PROXIES = [
+    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+    u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+    u => `https://thingproxy.freeboard.io/fetch/${u}`,
+  ];
+
+  // Simple page-level cache so retries never re-fetch the same API page.
+  const _pageCache = new Map();
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   async function apiFetch(url) {
-    // 1st attempt: direct
+    if (_pageCache.has(url)) return _pageCache.get(url);
+
+    // ── 1. Direct request ────────────────────────────────────────────────
     try {
       const r = await fetch(url, { mode: 'cors', credentials: 'omit' });
-      if (r.ok) return r.json();
-      // HTTP error (e.g. 429 rate-limit, 503) — try proxy before giving up
-      console.warn(`iNaturalist direct: HTTP ${r.status}. Trying proxy…`);
+      if (r.ok) {
+        const json = await r.json();
+        _pageCache.set(url, json);
+        return json;
+      }
+      // 429 → wait a moment before trying proxies
+      if (r.status === 429) await sleep(1500);
+      console.warn(`iNaturalist direct: HTTP ${r.status} — trying proxies…`);
     } catch (e) {
-      console.warn('iNaturalist direct fetch failed:', e.message, '— trying proxy…');
+      console.warn('iNaturalist direct failed:', e.message, '— trying proxies…');
     }
-    // 2nd attempt: via CORS proxy
-    const proxyUrl = CORS_PROXY + encodeURIComponent(url);
-    const r2 = await fetch(proxyUrl, { credentials: 'omit' });
-    if (!r2.ok) throw new Error(`Proxy returned HTTP ${r2.status}`);
-    return r2.json();
+
+    // ── 2. Proxy waterfall ───────────────────────────────────────────────
+    for (let i = 0; i < PROXIES.length; i++) {
+      const proxyUrl = PROXIES[i](url);
+      try {
+        const r = await fetch(proxyUrl, { credentials: 'omit' });
+        if (!r.ok) {
+          console.warn(`Proxy ${i+1} returned HTTP ${r.status} — trying next…`);
+          continue;
+        }
+        const json = await r.json();
+        _pageCache.set(url, json);
+        return json;
+      } catch (e) {
+        console.warn(`Proxy ${i+1} error: ${e.message} — trying next…`);
+      }
+    }
+
+    throw new Error('All endpoints failed — check console for details');
   }
 
   async function fetchRound(idx) {
@@ -855,41 +889,4 @@
     // Build deterministic round sequence from the code
     roundPlan = buildRoundPlan(gameCode, gameMode);
 
-    score = 0; currentRound = 1;
-    scoreEl.textContent = '0';
-    roundEl.textContent = `1/${MAX_ROUNDS}`;
-    playerNameEl.textContent = `Playing as ${playerName}`;
-    hcodeEl.textContent = gameCode;
-
-    menuScreen.classList.add('hidden');
-    endScreen.classList.add('hidden');
-    gameScreen.classList.remove('hidden');
-
-    initMap();
-    setTimeout(() => map && map.invalidateSize(), 120);
-    resetRound();
-    fetchRound(0);
-  });
-
-  function showMenu() {
-    endScreen.classList.add('hidden');
-    gameScreen.classList.add('hidden');
-    menuScreen.classList.remove('hidden');
-    renderAllLBs();
-  }
-
-  document.getElementById('restart-btn').addEventListener('click', showMenu);
-  document.getElementById('menu-btn').addEventListener('click', showMenu);
-  submitBtn.addEventListener('click', submitGuess);
-  nextBtn.addEventListener('click', nextRound);
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Boot
-  // ─────────────────────────────────────────────────────────────────────────
-  setCode(genCode());
-  renderAllLBs();
-  loadFaceModel(); // loads in background while user fills name
-  showMenu();
-</script>
-</body>
-</html>
+    score = 0; currentRou
