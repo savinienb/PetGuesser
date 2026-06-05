@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Petguesser</title>
+  <meta name="description" content="Guess where photos of cats and dogs were taken around the world!" />
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+
+  <style>
+    /* ── Tokens ─────────────────────────────────────────────────────────── */
+    :root {
+      --bg:      #0f0f10;
+      --surf:    #1a1a1d;
+      --surf2:   #222226;
+      --border:  rgba(255,255,255,0.07);
+      --text:    #f0f0f0;
+      --muted:   #666;
+      --accent:  #ff5722;
+      --accentH: #e64a19;
+      --green:   #4ade80;
+      --gold:    #ffd700;
+      --r: 14px;
+    }
+    *  { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100%; overflow: hidden; }
+    #app { width: 100vw; height: 100dvh; position: relative; }
+
+    /* ── Screens ─────────────────────────────────────────────────────────── */
+    .screen { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--bg); z-index: 1; transition: opacity .35s ease; }
+    .screen.hidden { opacity: 0; pointer-events: none; z-index: -1; }
+    #menu-screen, #end-screen {
+      justify-content: flex-start; align-items: center;
+      background: radial-gradient(ellipse at 50% -10%, #2a1208 0%, var(--bg) 60%);
+      overflow-y: auto; padding: 1.5rem 1rem 2rem;
+    }
+
+    /* ── Card ────────────────────────────────────────────────────────────── */
+    .card {
+      background: var(--surf); border: 1px solid var(--border);
+      border-radius: 22px; padding: clamp(1.2rem,4vw,2rem) clamp(1.2rem,4vw,2.2rem);
+      width: min(500px, 100%); box-shadow: 0 24px 70px rgba(0,0,0,0.65);
+    }
+    .card h1 {
+      font-size: clamp(1.8rem,7vw,2.5rem); text-align: center; margin-bottom: .2rem;
+      background: linear-gradient(90deg,#ff8a00,#e52e71);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .card > .subtitle { text-align: center; color: var(--muted); font-size: .83rem; margin-bottom: 1.1rem; }
+
+    /* ── Section label ───────────────────────────────────────────────────── */
+    .slabel { font-size: .63rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin-bottom: .45rem; }
+
+    /* ── Name row ────────────────────────────────────────────────────────── */
+    .name-row {
+      display: flex; margin-bottom: 1rem;
+      border: 2px solid var(--border); border-radius: 30px;
+      overflow: hidden; background: var(--surf2); transition: border-color .2s;
+    }
+    .name-row:focus-within { border-color: var(--accent); }
+    .name-row .nicn { padding: 0 12px; display: flex; align-items: center; font-size: 1rem; border-right: 1px solid var(--border); flex-shrink: 0; }
+    #name-input { flex: 1; padding: 10px 12px; background: transparent; border: none; outline: none; color: var(--text); font-size: .95rem; font-family: inherit; }
+    #name-input::placeholder { color: var(--muted); }
+
+    /* ── Code block ──────────────────────────────────────────────────────── */
+    .code-block { background: var(--surf2); border: 1px solid var(--border); border-radius: 12px; padding: 11px 13px; margin-bottom: 1rem; }
+    .code-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 9px; gap: 8px; }
+    #code-display {
+      font-family: 'JetBrains Mono', 'Courier New', monospace;
+      font-size: 1.9rem; font-weight: 700; letter-spacing: .25em; color: var(--accent);
+      line-height: 1;
+    }
+    #code-status { font-size: .62rem; color: var(--green); margin-top: 3px; min-height: .8rem; }
+    .code-join-row { display: flex; gap: 6px; }
+    #code-join-input {
+      flex: 1; padding: 7px 11px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text); font-size: .85rem; font-family: 'JetBrains Mono', monospace;
+      text-transform: uppercase; letter-spacing: .15em; outline: none; transition: border-color .2s;
+    }
+    #code-join-input:focus { border-color: var(--accent); }
+    #code-join-input::placeholder { font-family: inherit; letter-spacing: 0; color: var(--muted); font-size: .8rem; }
+
+    /* ── Settings ────────────────────────────────────────────────────────── */
+    .settings { display: flex; gap: 8px; margin-bottom: 1rem; }
+    .settings label {
+      flex: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
+      gap: 7px; background: var(--surf2); padding: 9px 8px; border-radius: 9px;
+      border: 1px solid var(--border); transition: border-color .2s; font-size: .9rem; user-select: none;
+    }
+    .settings label:hover { border-color: var(--accent); }
+    .settings input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); }
+
+    /* ── Buttons ─────────────────────────────────────────────────────────── */
+    button {
+      background: var(--accent); color: #fff; border: none;
+      padding: 11px 20px; font-size: .93rem; font-weight: 600; border-radius: 30px;
+      cursor: pointer; box-shadow: 0 4px 14px rgba(255,87,34,.28);
+      transition: all .18s; font-family: inherit; touch-action: manipulation;
+    }
+    button:hover:not(:disabled) { background: var(--accentH); transform: translateY(-2px); box-shadow: 0 6px 18px rgba(255,87,34,.38); }
+    button:active:not(:disabled) { transform: translateY(0); }
+    button:disabled { background: #252525; color: #404040; cursor: not-allowed; box-shadow: none; }
+    button.hidden { display: none !important; }
+    button.sm { padding: 7px 13px; font-size: .78rem; }
+    button.secondary { background: transparent; border: 1px solid var(--border); color: var(--muted); box-shadow: none; }
+    button.secondary:hover:not(:disabled) { background: var(--surf2); color: var(--text); transform: none; }
+    button.icon { width: 30px; height: 30px; padding: 0; border-radius: 50%; box-shadow: none; background: rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center; font-size: .95rem; }
+    button.icon:hover { background: rgba(255,255,255,.14); transform: none; }
+    .card button { display: block; width: 100%; margin-bottom: .65rem; }
+    .card button:last-child { margin-bottom: 0; }
+
+    /* ── Leaderboard ─────────────────────────────────────────────────────── */
+    .lb-wrap { margin-bottom: 1rem; }
+    .lb-cols { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 4px; }
+    /* thin horizontal scrollbar */
+    .lb-cols::-webkit-scrollbar { height: 3px; }
+    .lb-cols::-webkit-scrollbar-track { background: transparent; }
+    .lb-cols::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 2px; }
+
+    .lb-col {
+      flex: 1; min-width: 100px; background: var(--surf2);
+      border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden; display: flex; flex-direction: column;
+    }
+    .lb-col.overall { border-color: rgba(255,215,0,.18); }
+    .lb-col-hd {
+      padding: 6px 8px; text-align: center; font-weight: 700; font-size: .72rem;
+      background: rgba(0,0,0,.22); border-bottom: 1px solid var(--border);
+      flex-shrink: 0; white-space: nowrap;
+    }
+    .lb-col.overall .lb-col-hd { background: rgba(255,215,0,.06); }
+
+    .lb-col-body { overflow-y: auto; max-height: 148px; flex: 1; }
+    /* thin vertical scrollbar */
+    .lb-col-body::-webkit-scrollbar { width: 3px; }
+    .lb-col-body::-webkit-scrollbar-track { background: transparent; }
+    .lb-col-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,.1); border-radius: 2px; }
+
+    .lb-entry { display: flex; align-items: center; gap: 5px; padding: 5px 7px; border-bottom: 1px solid rgba(255,255,255,.03); font-size: .71rem; }
+    .lb-entry:last-child { border-bottom: none; }
+    .lb-entry.new-hs { background: rgba(74,222,128,.09); }
+    .lb-rank { font-weight: 700; width: 13px; text-align: right; flex-shrink: 0; color: var(--muted); font-size: .65rem; }
+    .lb-rank.r1 { color: var(--gold); }
+    .lb-rank.r2 { color: #aaa; }
+    .lb-rank.r3 { color: #cd7f32; }
+    .lb-info { flex: 1; min-width: 0; }
+    .lb-ename { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+    .lb-escore { color: var(--gold); font-size: .65rem; font-weight: 600; }
+    .lb-empty { padding: 14px 8px; text-align: center; color: var(--muted); font-size: .7rem; font-style: italic; }
+
+    /* ── Game header ─────────────────────────────────────────────────────── */
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: .6rem 1.1rem; background: rgba(10,10,12,.93);
+      backdrop-filter: blur(10px); box-shadow: 0 1px 0 var(--border);
+      z-index: 50; flex-shrink: 0; gap: 8px;
+    }
+    .header-left h1 {
+      font-size: 1.05rem; line-height: 1.1;
+      background: linear-gradient(90deg,#ff8a00,#e52e71);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    #player-name-display { font-size: .66rem; color: var(--muted); margin-top: 1px; }
+    .hcode {
+      font-family: 'JetBrains Mono', monospace; font-size: .72rem; font-weight: 700;
+      letter-spacing: .12em; color: var(--accent);
+      background: rgba(255,87,34,.1); border: 1px solid rgba(255,87,34,.25);
+      border-radius: 6px; padding: 3px 8px; white-space: nowrap; flex-shrink: 0;
+    }
+    #game-stats { display: flex; gap: .55rem; font-size: .83rem; font-weight: 600; flex-shrink: 0; }
+    .stat { background: var(--surf2); border: 1px solid var(--border); padding: 3px 9px; border-radius: 20px; white-space: nowrap; }
+
+    /* ── Replay banner ───────────────────────────────────────────────────── */
+    #replay-banner { background: rgba(255,165,0,.1); border-bottom: 1px solid rgba(255,165,0,.2); padding: 4px 12px; text-align: center; font-size: .73rem; color: #ffa040; flex-shrink: 0; }
+    #replay-banner.hidden { display: none; }
+
+    /* ── Main game area ──────────────────────────────────────────────────── */
+    main { flex: 1; position: relative; overflow: hidden; min-height: 0; }
+    #image-container { position: absolute; inset: 0; background: #000; display: flex; justify-content: center; align-items: center; }
+    #cat-canvas { max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
+    #loading { position: absolute; font-size: .88rem; color: var(--muted); animation: pulse 1.5s infinite; text-align: center; padding: 0 1rem; pointer-events: none; }
+    #blur-badge { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.62); backdrop-filter: blur(6px); border: 1px solid var(--border); border-radius: 20px; padding: 3px 11px; font-size: .67rem; color: var(--muted); z-index: 20; pointer-events: none; opacity: 0; transition: opacity .4s; white-space: nowrap; }
+    #blur-badge.visible { opacity: 1; }
+    @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
+
+    /* ── Map ─────────────────────────────────────────────────────────────── */
+    #map-container { position: absolute; bottom: 18px; right: 18px; width: 305px; height: 210px; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,.7); transition: all .3s cubic-bezier(.25,.8,.25,1); z-index: 500; border: 2px solid var(--border); background: var(--surf); }
+    #map-container:hover, #map-container.expanded { width: 58vw; height: 58vh; border-color: var(--accent); }
+    #map-loading-overlay { position: absolute; inset: 0; background: rgba(6,6,8,.75); backdrop-filter: blur(4px); z-index: 600; display: flex; align-items: center; justify-content: center; font-size: .73rem; color: var(--muted); transition: opacity .3s; pointer-events: none; }
+    #map-loading-overlay.hidden { opacity: 0; }
+    #map { width: 100%; height: 100%; background: #1a1a1a; }
+    #controls { position: absolute; bottom: 11px; left: 50%; transform: translateX(-50%); z-index: 700; display: flex; gap: 7px; white-space: nowrap; }
+    #controls button { padding: 9px 17px; font-size: .86rem; }
+    #map-toggle-btn { position: absolute; top: 7px; right: 7px; width: 30px; height: 30px; padding: 0; border-radius: 50%; z-index: 700; background: rgba(0,0,0,.65); color: #fff; font-size: .88rem; box-shadow: none; display: flex; align-items: center; justify-content: center; }
+
+    /* ── Result overlay ──────────────────────────────────────────────────── */
+    #result-overlay { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); background: rgba(10,10,12,.96); backdrop-filter: blur(14px); padding: 14px 28px; border-radius: 14px; text-align: center; z-index: 2000; box-shadow: 0 12px 40px rgba(0,0,0,.65); border: 1px solid var(--border); transition: opacity .3s, transform .3s; max-width: 90vw; }
+    #result-overlay.hidden { opacity: 0; pointer-events: none; transform: translate(-50%,-12px); }
+    #result-title    { font-size: 1.25rem; margin-bottom: 4px; }
+    #result-distance { font-size: .86rem; color: var(--muted); margin-bottom: 3px; }
+    #result-points   { font-size: 1.15rem; font-weight: 700; color: var(--gold); }
+    .pet-marker { display: flex; justify-content: center; align-items: center; }
+
+    /* ── End screen ──────────────────────────────────────────────────────── */
+    .final-block { text-align: center; padding: .6rem 0 .9rem; }
+    .final-block .flabel { color: var(--muted); font-size: .78rem; margin-bottom: 3px; }
+    .final-block .fvalue { font-size: 2.6rem; font-weight: 700; }
+    #hs-msg { color: var(--green); font-weight: 700; font-size: .88rem; text-align: center; margin-bottom: .9rem; animation: pulse 1.5s infinite; }
+
+    /* ── Mobile ──────────────────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      header { padding: .52rem .85rem; gap: 5px; }
+      .header-left h1 { font-size: .92rem; }
+      .hcode { font-size: .62rem; padding: 2px 6px; }
+      #game-stats { gap: .35rem; font-size: .77rem; }
+      .stat { padding: 2px 8px; }
+
+      main { display: flex; flex-direction: column; }
+      #image-container { position: relative; flex: 1; min-height: 0; }
+      #map-container { position: relative; bottom: auto; right: auto; width: 100%; height: 36vh; border-radius: 0; border: none; border-top: 1px solid var(--border); box-shadow: none; }
+      #map-container:hover { width: 100%; height: 36vh; }
+      #map-container.expanded { height: 70vh; border-top-color: var(--accent); }
+      #map-toggle-btn { display: flex !important; }
+      #controls button { padding: 8px 14px; font-size: .82rem; }
+
+      #result-overlay { padding: 11px 16px; }
+      #result-title   { font-size: 1.05rem; }
+      #result-points  { font-size: 1rem; }
+      .lb-col { min-width: 90px; }
+      .lb-col-hd { font-size: .66rem; }
+      .lb-entry { font-size: .67rem; padding: 4px 6px; }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ══ Menu ══ -->
+  <div id="menu-screen" class="screen">
+    <div class="card">
+      <h1>Petguesser 🐾</h1>
+      <p class="subtitle">Guess where pets were spotted around the world!</p>
+
+      <!-- Name (required) -->
+      <div class="name-row">
+        <div class="nicn">👤</div>
+        <input id="name-input" type="text" placeholder="Your name to play…" maxlength="20"
+               autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" />
+      </div>
+
+      <!-- Game code -->
+      <div class="code-block">
+        <div class="code-top">
+          <div>
+            <div class="slabel">🎮 Game Code</div>
+            <div id="code-display">ABCDE</div>
+            <div id="code-status"></div>
+          </div>
+          <button class="icon" id="new-code-btn" title="Generate new code">↻</button>
+        </div>
+        <div class="code-join-row">
+          <input id="code-join-input" type="text" placeholder="Enter friend's code…" maxlength="5" />
+          <button class="sm" id="code-join-btn">Join</button>
+        </div>
+      </div>
+
+      <!-- Pet type -->
+      <div class="settings">
+        <label><input type="checkbox" id="check-cats" checked> Cats 🐱</label>
+        <label><input type="checkbox" id="check-dogs" checked> Dogs 🐶</label>
+      </div>
+
+      <!-- Leaderboard -->
+      <div class="slabel">🏅 High Scores — Top 10</div>
+      <div class="lb-wrap">
+        <div class="lb-cols">
+          <div class="lb-col">
+            <div class="lb-col-hd">🐱 Cats</div>
+            <div class="lb-col-body" id="lb-cat"></div>
+          </div>
+          <div class="lb-col">
+            <div class="lb-col-hd">🐶 Dogs</div>
+            <div class="lb-col-body" id="lb-dog"></div>
+          </div>
+          <div class="lb-col">
+            <div class="lb-col-hd">🐾 Both</div>
+            <div class="lb-col-body" id="lb-both"></div>
+          </div>
+          <div class="lb-col overall">
+            <div class="lb-col-hd">🏆 Overall</div>
+            <div class="lb-col-body" id="lb-overall"></div>
+          </div>
+        </div>
+      </div>
+
+      <button id="start-btn" disabled>Enter your name to play</button>
+    </div>
+  </div>
+
+  <!-- ══ Game ══ -->
+  <div id="game-screen" class="screen hidden">
+    <header>
+      <div class="header-left">
+        <h1>Petguesser</h1>
+        <div id="player-name-display"></div>
+      </div>
+      <div class="hcode" id="hcode">XXXXX</div>
+      <div id="game-stats">
+        <span class="stat">Round <span id="round-display">1/5</span></span>
+        <span class="stat">Score: <span id="score">0</span></span>
+      </div>
+    </header>
+    <div id="replay-banner" class="hidden">⚠️ Replay — score won't be recorded for this code</div>
+
+    <main>
+      <div id="image-container">
+        <div id="loading">Loading cute pet…</div>
+        <canvas id="cat-canvas" aria-label="Where is this pet?"></canvas>
+        <div id="blur-badge">🫥 Faces blurred</div>
+      </div>
+      <div id="map-container">
+        <div id="map"></div>
+        <div id="map-loading-overlay">Waiting for image…</div>
+        <div id="controls">
+          <button id="submit-btn" disabled>Submit Guess</button>
+          <button id="next-btn" class="hidden">Next Round</button>
+        </div>
+        <button id="map-toggle-btn" title="Toggle map">⤢</button>
+      </div>
+    </main>
+  </div>
+
+  <!-- ══ End ══ -->
+  <div id="end-screen" class="screen hidden">
+    <div class="card">
+      <h1>Game Over!</h1>
+      <div class="final-block">
+        <div class="flabel">Your Score</div>
+        <div class="fvalue" id="final-score">0</div>
+      </div>
+      <p id="hs-msg" class="hidden">🎉 New High Score! 🎉</p>
+
+      <div class="slabel">🏅 High Scores — Top 10</div>
+      <div class="lb-wrap">
+        <div class="lb-cols">
+          <div class="lb-col">
+            <div class="lb-col-hd">🐱 Cats</div>
+            <div class="lb-col-body" id="end-lb-cat"></div>
+          </div>
+          <div class="lb-col">
+            <div class="lb-col-hd">🐶 Dogs</div>
+            <div class="lb-col-body" id="end-lb-dog"></div>
+          </div>
+          <div class="lb-col">
+            <div class="lb-col-hd">🐾 Both</div>
+            <div class="lb-col-body" id="end-lb-both"></div>
+          </div>
+          <div class="lb-col overall">
+            <div class="lb-col-hd">🏆 Overall</div>
+            <div class="lb-col-body" id="end-lb-overall"></div>
+          </div>
+        </div>
+      </div>
+
+      <button id="restart-btn">Play Again</button>
+      <button id="menu-btn" class="secondary">Change Player / Settings</button>
+    </div>
+  </div>
+
+  <!-- ══ Result overlay ══ -->
+  <div id="result-overlay" class="hidden">
+    <h2 id="result-title"></h2>
+    <p id="result-distance"></p>
+    <p id="result-points"></p>
+  </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script>
+  // ─────────────────────────────────────────────────────────────────────────
+  // Constants
+  // ─────────────────────────────────────────────────────────────────────────
+  const MAX_ROUNDS = 5;
+  const MODES      = ['cat','dog','both','overall'];
+  const MODEL_URL  = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
+  const ALPHABET   = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Storage helpers
+  // ─────────────────────────────────────────────────────────────────────────
+  /** Load top-10 array for a mode. Each entry: { name, score, code } */
+  function loadLB(mode) {
+    try { return JSON.parse(localStorage.getItem(`pg_lb_${mode}`)) || []; }
+    catch { return []; }
+  }
+  function saveLB(mode, arr) {
+    localStorage.setItem(`pg_lb_${mode}`, JSON.stringify(arr.slice(0, 10)));
+  }
+
+  /**
+   * Insert an entry, re-sort, keep top 10, persist.
+   * Returns the index of the entry in the final top-10 (-1 if not made it).
+   */
+  function insertScore(mode, entry) {
+    const lb = loadLB(mode);
+    lb.push(entry);
+    lb.sort((a, b) => b.score - a.score);
+    const top10 = lb.slice(0, 10);
+    saveLB(mode, top10);
+    return top10.findIndex(e => e.name === entry.name && e.score === entry.score && e.code === entry.code);
+  }
+
+  /** First-try-only gate: one recording per (code × player-name). */
+  function playedKey(code, name) {
+    return `pg_p_${code}_${name.toLowerCase().replace(/\W/g, '_')}`;
+  }
+  function hasPlayed(code, name) { return localStorage.getItem(playedKey(code, name)) !== null; }
+  function markPlayed(code, name) { localStorage.setItem(playedKey(code, name), '1'); }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Seeded RNG (xorshift32 + FNV-1a hash for code → seed)
+  // ─────────────────────────────────────────────────────────────────────────
+  function codeToSeed(code) {
+    let h = 2166136261 >>> 0;
+    for (const c of code) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619) >>> 0; }
+    return h || 1;
+  }
+  function mkRng(seed) {
+    let s = seed >>> 0 || 1;
+    return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; };
+  }
+
+  /** Pre-generate all round parameters deterministically from code + mode. */
+  function buildRoundPlan(code, mode) {
+    const rng = mkRng(codeToSeed(code));
+    return Array.from({ length: MAX_ROUNDS }, () => ({
+      species: mode === 'both' ? (rng() < .5 ? 'cat' : 'dog') : mode,
+      page:    Math.floor(rng() * 100) + 1,  // iNaturalist page 1-100
+      pick:    rng(),                          // fraction 0-1 → observation index
+    }));
+  }
+
+  /** Generate a random 5-letter uppercase code. */
+  function genCode() {
+    return Array.from({ length: 5 }, () => ALPHABET[Math.floor(Math.random() * 26)]).join('');
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Game state
+  // ─────────────────────────────────────────────────────────────────────────
+  let currentRound   = 1;
+  let score          = 0;
+  let gameMode       = 'both';
+  let currentSpecies = 'cat';
+  let currentPet     = null;
+  let roundPlan      = [];
+  let gameCode       = genCode();
+  let isReplay       = false;
+  let playerName     = sessionStorage.getItem('pg_name') || '';
+  let userMarker     = null;
+  let actualMarker   = null;
+  let polylineLine   = null;
+  let map            = null;
+  let faceModelReady = false;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // DOM refs
+  // ─────────────────────────────────────────────────────────────────────────
+  const menuScreen    = document.getElementById('menu-screen');
+  const gameScreen    = document.getElementById('game-screen');
+  const endScreen     = document.getElementById('end-screen');
+  const nameInputEl   = document.getElementById('name-input');
+  const startBtn      = document.getElementById('start-btn');
+  const codeDisplayEl = document.getElementById('code-display');
+  const codeStatusEl  = document.getElementById('code-status');
+  const codeJoinInput = document.getElementById('code-join-input');
+  const hcodeEl       = document.getElementById('hcode');
+  const scoreEl       = document.getElementById('score');
+  const roundEl       = document.getElementById('round-display');
+  const playerNameEl  = document.getElementById('player-name-display');
+  const catCanvasEl   = document.getElementById('cat-canvas');
+  const blurBadgeEl   = document.getElementById('blur-badge');
+  const loadingEl     = document.getElementById('loading');
+  const submitBtn     = document.getElementById('submit-btn');
+  const nextBtn       = document.getElementById('next-btn');
+  const resultOverlay = document.getElementById('result-overlay');
+  const resultTitle   = document.getElementById('result-title');
+  const resultDist    = document.getElementById('result-distance');
+  const resultPts     = document.getElementById('result-points');
+  const mapContainer  = document.getElementById('map-container');
+  const mapLoadingOv  = document.getElementById('map-loading-overlay');
+  const finalScoreEl  = document.getElementById('final-score');
+  const hsMsgEl       = document.getElementById('hs-msg');
+  const replayBanner  = document.getElementById('replay-banner');
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Leaderboard rendering
+  // ─────────────────────────────────────────────────────────────────────────
+  function renderCol(bodyEl, mode, newEntry) {
+    const entries = loadLB(mode);
+    if (!entries.length) {
+      bodyEl.innerHTML = '<div class="lb-empty">No scores yet</div>';
+      return;
+    }
+    bodyEl.innerHTML = entries.map((e, i) => {
+      const rc  = ['r1','r2','r3'][i] || '';
+      const isN = newEntry && e.name === newEntry.name && e.score === newEntry.score && e.code === newEntry.code;
+      return `<div class="lb-entry${isN ? ' new-hs' : ''}">
+        <span class="lb-rank ${rc}">${i+1}</span>
+        <div class="lb-info">
+          <div class="lb-ename" title="${e.name}">${e.name}</div>
+          <div class="lb-escore">${e.score.toLocaleString()}</div>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function renderAllLBs(newEntry = null) {
+    MODES.forEach(m => {
+      const a = document.getElementById(`lb-${m}`);
+      const b = document.getElementById(`end-lb-${m}`);
+      if (a) renderCol(a, m, newEntry);
+      if (b) renderCol(b, m, newEntry);
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Code helpers
+  // ─────────────────────────────────────────────────────────────────────────
+  function setCode(code, joined = false) {
+    gameCode = code;
+    codeDisplayEl.textContent = code;
+    codeStatusEl.textContent  = joined ? '✓ Friend\'s code joined' : '';
+    codeStatusEl.style.color  = 'var(--green)';
+  }
+
+  document.getElementById('new-code-btn').addEventListener('click', () => {
+    setCode(genCode(), false);
+    codeJoinInput.value = '';
+  });
+
+  document.getElementById('code-join-btn').addEventListener('click', () => {
+    const raw = codeJoinInput.value.trim().toUpperCase().replace(/[^A-Z]/g, '');
+    if (raw.length < 5) { codeJoinInput.classList.add('err'); return; }
+    codeJoinInput.classList.remove('err');
+    setCode(raw.slice(0, 5), true);
+    codeJoinInput.value = '';
+  });
+
+  codeJoinInput.addEventListener('input', e => {
+    e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '');
+    e.target.classList.remove('err');
+  });
+  codeJoinInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.getElementById('code-join-btn').click();
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Name → start button gate
+  // ─────────────────────────────────────────────────────────────────────────
+  function refreshStartBtn() {
+    const v = nameInputEl.value.trim();
+    startBtn.disabled    = !v;
+    startBtn.textContent = v ? 'Start Game (5 Rounds)' : 'Enter your name to play';
+  }
+  nameInputEl.addEventListener('input', refreshStartBtn);
+  nameInputEl.addEventListener('keydown', e => { if (e.key === 'Enter' && !startBtn.disabled) startBtn.click(); });
+  if (playerName) { nameInputEl.value = playerName; refreshStartBtn(); }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Face model
+  // ─────────────────────────────────────────────────────────────────────────
+  async function loadFaceModel() {
+    try { await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL); faceModelReady = true; }
+    catch (e) { console.warn('Face model unavailable.', e); }
+  }
+
+  async function renderPetWithBlur(url) {
+    return new Promise(resolve => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = async () => {
+        catCanvasEl.width  = img.naturalWidth;
+        catCanvasEl.height = img.naturalHeight;
+        const ctx = catCanvasEl.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        blurBadgeEl.classList.remove('visible');
+
+        if (faceModelReady) {
+          try {
+            const DET = 640, sc = Math.min(1, DET / Math.max(img.naturalWidth, img.naturalHeight));
+            const dw = Math.round(img.naturalWidth * sc), dh = Math.round(img.naturalHeight * sc);
+            const det = document.createElement('canvas');
+            det.width = dw; det.height = dh;
+            det.getContext('2d').drawImage(img, 0, 0, dw, dh);
+
+            const faces = await faceapi.detectAllFaces(det, new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: .45 }));
+            if (faces.length) {
+              blurBadgeEl.classList.add('visible');
+              for (const f of faces) {
+                const pad = .28;
+                const fx = f.box.x/sc, fy = f.box.y/sc, fw = f.box.width/sc, fh = f.box.height/sc;
+                const bx = Math.max(0, fx - fw*pad), by = Math.max(0, fy - fh*pad);
+                const bw = Math.min(catCanvasEl.width  - bx, fw*(1+2*pad));
+                const bh = Math.min(catCanvasEl.height - by, fh*(1+2*pad));
+                const S = .05;
+                const tmp = document.createElement('canvas');
+                tmp.width = Math.max(1, Math.round(bw*S)); tmp.height = Math.max(1, Math.round(bh*S));
+                tmp.getContext('2d').drawImage(catCanvasEl, bx, by, bw, bh, 0, 0, tmp.width, tmp.height);
+                ctx.imageSmoothingEnabled = false;
+                ctx.drawImage(tmp, 0, 0, tmp.width, tmp.height, bx, by, bw, bh);
+                ctx.imageSmoothingEnabled = true;
+                ctx.filter = 'blur(14px)'; ctx.drawImage(catCanvasEl, bx, by, bw, bh, bx, by, bw, bh); ctx.filter = 'none';
+              }
+            }
+          } catch (e) { console.warn('Face detection:', e); }
+        }
+
+        loadingEl.style.display   = 'none';
+        catCanvasEl.style.display = 'block';
+        mapLoadingOv.classList.add('hidden');
+        resolve();
+      };
+      img.onerror = () => { loadingEl.textContent = 'Image failed. Retrying…'; mapLoadingOv.classList.add('hidden'); resolve(); };
+      img.src = url;
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Map
+  // ─────────────────────────────────────────────────────────────────────────
+  function initMap() {
+    if (!map) {
+      map = L.map('map', { zoomControl: false }).setView([20, 0], 2);
+      L.control.zoom({ position: 'topright' }).addTo(map);
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OSM contributors &copy; CARTO', subdomains: 'abcd', maxZoom: 19
+      }).addTo(map);
+      map.on('click', onMapClick);
+    } else { map.setView([20, 0], 2); }
+  }
+
+  document.getElementById('map-toggle-btn').addEventListener('click', () => {
+    mapContainer.classList.toggle('expanded');
+    setTimeout(() => map && map.invalidateSize(), 320);
+  });
+  mapContainer.addEventListener('transitionend', () => { if (map) map.invalidateSize(); });
+
+  function onMapClick(e) {
+    if (!nextBtn.classList.contains('hidden')) return;
+    if (userMarker) userMarker.setLatLng(e.latlng);
+    else userMarker = L.marker(e.latlng).addTo(map);
+    submitBtn.disabled = false;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Fetch — uses the seeded round plan for deterministic sequences
+  // ─────────────────────────────────────────────────────────────────────────
+  async function fetchRound(idx) {
+    catCanvasEl.style.display = 'none';
+    blurBadgeEl.classList.remove('visible');
+    loadingEl.style.display = 'block';
+    loadingEl.textContent   = 'Loading cute pet…';
+    mapLoadingOv.classList.remove('hidden');
+    submitBtn.disabled = true;
+
+    const plan = roundPlan[idx];
+    currentSpecies = plan.species;
+    const taxon = currentSpecies === 'cat' ? 'Felis%20catus' : 'Canis%20lupus%20familiaris';
+    const url   = `https://api.inaturalist.org/v1/observations?taxon_name=${taxon}&has_photos=true&geoprivacy=open&per_page=200&page=${plan.page}`;
+
+    try {
+      const data     = await fetch(url).then(r => r.json());
+      const validObs = data.results.filter(o => o.location && o.photos?.length);
+      if (!validObs.length) { loadingEl.textContent = 'Empty page. Retrying…'; return fetchRound(idx); }
+
+      const obs      = validObs[Math.floor(plan.pick * validObs.length) % validObs.length];
+      const imageUrl = obs.photos[0].url.replace('square','large').replace('medium','large');
+      const [lat, lng] = obs.location.split(',').map(Number);
+      currentPet = { lat, lng };
+
+      await renderPetWithBlur(imageUrl);
+      submitBtn.disabled = false;
+
+    } catch (err) {
+      console.error('Fetch error:', err);
+      loadingEl.textContent = 'Network error. Retrying…';
+      mapLoadingOv.classList.add('hidden');
+      setTimeout(() => fetchRound(idx), 2000);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Scoring
+  // ─────────────────────────────────────────────────────────────────────────
+  function deg2rad(d) { return d * Math.PI / 180; }
+  function calcDist(lat1, lon1, lat2, lon2) {
+    const R = 6371, dLat = deg2rad(lat2-lat1), dLon = deg2rad(lon2-lon1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(deg2rad(lat1))*Math.cos(deg2rad(lat2))*Math.sin(dLon/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+  function calcPoints(d) {
+    if (d <= 50) return 5000;
+    if (d >= 15000) return 0;
+    return Math.max(0, Math.round(5000 * (1 - d/15000)**2));
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Submit guess
+  // ─────────────────────────────────────────────────────────────────────────
+  function submitGuess() {
+    if (!userMarker || !currentPet) return;
+    submitBtn.classList.add('hidden');
+    nextBtn.classList.remove('hidden');
+
+    const guess  = userMarker.getLatLng();
+    const actual = [currentPet.lat, currentPet.lng];
+    const dist   = calcDist(guess.lat, guess.lng, actual[0], actual[1]);
+    const pts    = calcPoints(dist);
+    score += pts;
+    scoreEl.textContent = score.toLocaleString();
+
+    const emoji   = currentSpecies === 'cat' ? '🐱' : '🐶';
+    const petIcon = L.divIcon({ html: `<div style="font-size:25px;line-height:1">${emoji}</div>`, className: 'pet-marker', iconSize: [25,25], iconAnchor: [12,25] });
+    actualMarker = L.marker(actual, { icon: petIcon }).addTo(map);
+    actualMarker.bindPopup('Actual location!').openPopup();
+    polylineLine = L.polyline([guess, actual], { color:'#ff5722', weight:3, dashArray:'6,10' }).addTo(map);
+    map.fitBounds(polylineLine.getBounds(), { padding:[50,50] });
+    mapContainer.classList.add('expanded');
+    setTimeout(() => map.invalidateSize(), 50);
+
+    resultDist.textContent = `You were ${Math.round(dist).toLocaleString()} km away!`;
+    resultPts.textContent  = `+${pts.toLocaleString()} pts`;
+
+    const puns = currentSpecies === 'cat'
+      ? { g:'Purr-fect Guess! 🐱', o:'Claw-some effort! 😸', b:'Cat-astrophe! 🙀' }
+      : { g:'Paw-some Guess! 🐶',  o:'Fetching effort! 🐕',  b:'Ruff miss… 🐩'  };
+
+    if (pts > 4500)      { resultTitle.textContent = puns.g; resultTitle.style.color = 'var(--green)'; }
+    else if (pts > 2000) { resultTitle.textContent = puns.o; resultTitle.style.color = '#ff9800'; }
+    else                 { resultTitle.textContent = puns.b; resultTitle.style.color = '#f44336'; }
+
+    resultOverlay.classList.remove('hidden');
+    nextBtn.textContent = currentRound === MAX_ROUNDS ? 'View Results' : 'Next Round';
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Round management
+  // ─────────────────────────────────────────────────────────────────────────
+  function nextRound() {
+    if (currentRound === MAX_ROUNDS) { endGame(); return; }
+    currentRound++;
+    roundEl.textContent = `${currentRound}/${MAX_ROUNDS}`;
+    resetRound();
+    fetchRound(currentRound - 1);
+  }
+
+  function resetRound() {
+    resultOverlay.classList.add('hidden');
+    mapContainer.classList.remove('expanded');
+    submitBtn.classList.remove('hidden');
+    submitBtn.disabled = true;
+    nextBtn.classList.add('hidden');
+    catCanvasEl.style.display = 'none';
+    blurBadgeEl.classList.remove('visible');
+    if (userMarker)   map.removeLayer(userMarker);
+    if (actualMarker) map.removeLayer(actualMarker);
+    if (polylineLine) map.removeLayer(polylineLine);
+    userMarker = actualMarker = polylineLine = null;
+    map.setView([20, 0], 2);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // End game — record scores, update leaderboards
+  // ─────────────────────────────────────────────────────────────────────────
+  function endGame() {
+    gameScreen.classList.add('hidden');
+    endScreen.classList.remove('hidden');
+    finalScoreEl.textContent = score.toLocaleString();
+
+    let newEntry = null;
+
+    if (!isReplay) {
+      const entry = { name: playerName, score, code: gameCode };
+      const modeRank    = insertScore(gameMode, entry);
+      const overallRank = insertScore('overall', { ...entry });
+      const isNewHS     = modeRank !== -1 || overallRank !== -1;
+
+      hsMsgEl.classList.toggle('hidden', !isNewHS);
+      if (isNewHS) newEntry = entry;
+
+      // Prevent future recordings for this code+player combo
+      markPlayed(gameCode, playerName);
+    } else {
+      hsMsgEl.classList.add('hidden');
+    }
+
+    renderAllLBs(newEntry);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Start game
+  // ─────────────────────────────────────────────────────────────────────────
+  startBtn.addEventListener('click', () => {
+    const n = nameInputEl.value.trim();
+    if (!n) return;
+    playerName = n;
+    sessionStorage.setItem('pg_name', playerName);
+
+    const useCats = document.getElementById('check-cats').checked;
+    const useDogs = document.getElementById('check-dogs').checked;
+    if (!useCats && !useDogs) { alert('Select at least one pet type!'); return; }
+    gameMode = useCats && useDogs ? 'both' : useCats ? 'cat' : 'dog';
+
+    // Check first-try rule BEFORE the game starts
+    isReplay = hasPlayed(gameCode, playerName);
+    replayBanner.classList.toggle('hidden', !isReplay);
+
+    // Build deterministic round sequence from the code
+    roundPlan = buildRoundPlan(gameCode, gameMode);
+
+    score = 0; currentRound = 1;
+    scoreEl.textContent = '0';
+    roundEl.textContent = `1/${MAX_ROUNDS}`;
+    playerNameEl.textContent = `Playing as ${playerName}`;
+    hcodeEl.textContent = gameCode;
+
+    menuScreen.classList.add('hidden');
+    endScreen.classList.add('hidden');
+    gameScreen.classList.remove('hidden');
+
+    initMap();
+    setTimeout(() => map && map.invalidateSize(), 120);
+    resetRound();
+    fetchRound(0);
+  });
+
+  function showMenu() {
+    endScreen.classList.add('hidden');
+    gameScreen.classList.add('hidden');
+    menuScreen.classList.remove('hidden');
+    renderAllLBs();
+  }
+
+  document.getElementById('restart-btn').addEventListener('click', showMenu);
+  document.getElementById('menu-btn').addEventListener('click', showMenu);
+  submitBtn.addEventListener('click', submitGuess);
+  nextBtn.addEventListener('click', nextRound);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Boot
+  // ─────────────────────────────────────────────────────────────────────────
+  setCode(genCode());
+  renderAllLBs();
+  loadFaceModel(); // loads in background while user fills name
+  showMenu();
+</script>
+</body>
+</html>
