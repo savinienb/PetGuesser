@@ -756,7 +756,7 @@
     // iNaturalist enforces strict rate limits. Making 5 parallel requests often triggers a 403 block.
     (async () => {
       for (let i = 1; i < MAX_ROUNDS; i++) {
-        await sleep(1200); // 1.2s delay between requests
+        await sleep(2500); // 1.2s delay between requests
         try {
           const data = await fetchRoundData(roundPlan[i], i);
           deferreds[i].resolve(data);
