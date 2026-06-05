@@ -669,61 +669,45 @@
 
   // ─────────────────────────────────────────────────────────────────────────
   // Fetch — uses the seeded round plan for deterministic sequences
-  // Falls through a waterfall of proxies so a single bad proxy can't break
-  // the game. An in-memory cache avoids re-hitting the API on retry.
+  // Uses JSONP to bypass CORS issues entirely, with an in-memory cache.
   // ─────────────────────────────────────────────────────────────────────────
   const INATURALIST = 'https://api.inaturalist.org/v1/observations';
-
-  // Ordered list of proxy wrappers. Each takes the target URL and returns a
-  // full URL to fetch. We try them in order, skipping any that error or
-  // return a non-ok status. Add more entries here if needed.
-  const PROXIES = [
-    u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-    u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
-    u => `https://thingproxy.freeboard.io/fetch/${u}`,
-  ];
 
   // Simple page-level cache so retries never re-fetch the same API page.
   const _pageCache = new Map();
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-  async function apiFetch(url) {
-    if (_pageCache.has(url)) return _pageCache.get(url);
+  function apiFetch(url) {
+    if (_pageCache.has(url)) return Promise.resolve(_pageCache.get(url));
 
-    // ── 1. Direct request ────────────────────────────────────────────────
-    try {
-      const r = await fetch(url, { mode: 'cors', credentials: 'omit' });
-      if (r.ok) {
-        const json = await r.json();
-        _pageCache.set(url, json);
-        return json;
+    return new Promise((resolve, reject) => {
+      // iNaturalist looks for a "callback" parameter to wrap the JSON response
+      const callbackName = 'inat_' + Math.random().toString(36).substr(2, 9);
+      const script = document.createElement('script');
+      
+      // Append the callback name to the URL
+      script.src = `${url}&callback=${callbackName}`;
+      
+      // Define the temporary global function that iNaturalist will trigger
+      window[callbackName] = (data) => {
+        _pageCache.set(url, data);
+        resolve(data);
+        cleanup();
+      };
+      
+      script.onerror = () => {
+        reject(new Error('JSONP request failed'));
+        cleanup();
+      };
+      
+      function cleanup() {
+        delete window[callbackName];
+        script.remove();
       }
-      // 429 → wait a moment before trying proxies
-      if (r.status === 429) await sleep(1500);
-      console.warn(`iNaturalist direct: HTTP ${r.status} — trying proxies…`);
-    } catch (e) {
-      console.warn('iNaturalist direct failed:', e.message, '— trying proxies…');
-    }
-
-    // ── 2. Proxy waterfall ───────────────────────────────────────────────
-    for (let i = 0; i < PROXIES.length; i++) {
-      const proxyUrl = PROXIES[i](url);
-      try {
-        const r = await fetch(proxyUrl, { credentials: 'omit' });
-        if (!r.ok) {
-          console.warn(`Proxy ${i+1} returned HTTP ${r.status} — trying next…`);
-          continue;
-        }
-        const json = await r.json();
-        _pageCache.set(url, json);
-        return json;
-      } catch (e) {
-        console.warn(`Proxy ${i+1} error: ${e.message} — trying next…`);
-      }
-    }
-
-    throw new Error('All endpoints failed — check console for details');
+      
+      document.body.appendChild(script);
+    });
   }
 
   async function fetchRoundData(plan, idx) {
