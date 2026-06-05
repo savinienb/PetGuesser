@@ -734,12 +734,37 @@
   }
 
   async function prefetchGameData() {
+    let deferreds = [];
     prefetchedRounds = roundPlan.map((plan, idx) => {
-      const p = fetchRoundData(plan, idx);
+      let resolve, reject;
+      const p = new Promise((res, rej) => { resolve = res; reject = rej; });
       p.catch(() => {}); // Prevent unhandled promise rejection warnings in console
+      deferreds.push({ resolve, reject });
       return p;
     });
-    await prefetchedRounds[0]; // Wait only for the first round before starting
+
+    // 1. Fetch first round and block until it's ready
+    try {
+      const firstData = await fetchRoundData(roundPlan[0], 0);
+      deferreds[0].resolve(firstData);
+    } catch (err) {
+      deferreds[0].reject(err);
+      throw err; // Stop game from starting
+    }
+
+    // 2. Fetch the rest sequentially in the background
+    // iNaturalist enforces strict rate limits. Making 5 parallel requests often triggers a 403 block.
+    (async () => {
+      for (let i = 1; i < MAX_ROUNDS; i++) {
+        await sleep(1200); // 1.2s delay between requests
+        try {
+          const data = await fetchRoundData(roundPlan[i], i);
+          deferreds[i].resolve(data);
+        } catch (err) {
+          deferreds[i].reject(err);
+        }
+      }
+    })();
   }
 
   async function loadRound(idx) {
