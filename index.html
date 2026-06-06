@@ -426,8 +426,26 @@
     for (const sp of speciesList) {
       speciesPages[sp] = Math.floor(rng() * 50) + 1;
     }
+
+    // Balance animals
+    let pool = [];
+    while (pool.length < MAX_ROUNDS) {
+      let arr = [...speciesList];
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(rng() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      pool.push(...arr);
+    }
+    pool = pool.slice(0, MAX_ROUNDS);
+
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+
     return Array.from({ length: MAX_ROUNDS }, (_, i) => {
-      const species = speciesList[Math.floor(rng() * speciesList.length)];
+      const species = pool[i];
       return {
         species: species,
         page: speciesPages[species],
@@ -516,33 +534,47 @@
     }).join('');
   }
 
-  /** Build lb columns HTML for the given species list + overall.
-   *  Only shows a species column if that species has at least one score recorded. */
+  function getModeKey(speciesList) {
+    return speciesList.sort().join('+');
+  }
+
+  function getModeLabel(speciesList) {
+    if (speciesList.length === 1) {
+      const a = ANIMALS[speciesList[0]];
+      return `${a.emoji} ${a.label}`;
+    }
+    if (speciesList.length === 4) {
+      return '🌍 All Animals';
+    }
+    return speciesList.map(sp => ANIMALS[sp].emoji).join(' ') + ' Mixed';
+  }
+
+  /** Build lb columns HTML for the given species list + overall. */
   function buildLbCols(container, speciesList, newEntry) {
     container.innerHTML = '';
-    // One column per selected species that has scores
-    for (const sp of speciesList) {
-      const entries = loadLB(sp);
-      if (!entries.length) continue; // skip empty leaderboards
-      const a = ANIMALS[sp];
-      const col = document.createElement('div');
-      col.className = 'lb-col';
-      const body = document.createElement('div');
-      body.className = 'lb-col-body';
-      col.innerHTML = `<div class="lb-col-hd">${a.emoji} ${a.label}</div>`;
-      col.appendChild(body);
-      container.appendChild(col);
-      renderCol(body, sp, newEntry);
-    }
-    // Overall column always shown
-    const overall = document.createElement('div');
-    overall.className = 'lb-col overall';
-    const obody = document.createElement('div');
-    obody.className = 'lb-col-body';
-    overall.innerHTML = '<div class="lb-col-hd">🏆 Overall</div>';
-    overall.appendChild(obody);
-    container.appendChild(overall);
-    renderCol(obody, 'overall', newEntry);
+    
+    // 1) Current Selection Column
+    const selMode = getModeKey(speciesList);
+    const selLabel = getModeLabel(speciesList);
+    
+    const col1 = document.createElement('div');
+    col1.className = 'lb-col';
+    const body1 = document.createElement('div');
+    body1.className = 'lb-col-body';
+    col1.innerHTML = `<div class="lb-col-hd">${selLabel}</div>`;
+    col1.appendChild(body1);
+    container.appendChild(col1);
+    renderCol(body1, selMode, newEntry);
+
+    // 2) Overall Column
+    const col2 = document.createElement('div');
+    col2.className = 'lb-col overall';
+    const body2 = document.createElement('div');
+    body2.className = 'lb-col-body';
+    col2.innerHTML = '<div class="lb-col-hd">🏆 Overall</div>';
+    col2.appendChild(body2);
+    container.appendChild(col2);
+    renderCol(body2, 'overall', newEntry);
   }
 
   function renderAllLBs(newEntry = null) {
@@ -703,24 +735,33 @@
   // Global rate-limiter: enforce ≥1500ms between API requests to stay well
   // within iNaturalist's ~1 req/sec guideline and avoid IP blocks.
   let _lastFetchTime = 0;
+  let _fetchLock = Promise.resolve();
+
   async function apiFetch(url) {
     if (_pageCache.has(url)) return _pageCache.get(url);
-    const now  = Date.now();
-    const wait = Math.max(0, 1500 - (now - _lastFetchTime));
-    if (wait > 0) await sleep(wait);
-    _lastFetchTime = Date.now();
-    console.log('[iNat] fetch', url.replace(INAT_V1, ''));
-    const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
-    if (response.status === 429) {
-      // Respect rate-limit: back off 8 s before throwing so caller can retry
-      console.warn('[iNat] 429 rate-limited — backing off 8 s');
-      await sleep(8000);
-      throw new Error('HTTP 429 – rate limited');
-    }
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
-    _pageCache.set(url, data);
-    return data;
+    
+    const fetchTask = _fetchLock.then(async () => {
+      if (_pageCache.has(url)) return _pageCache.get(url);
+      const now  = Date.now();
+      const wait = Math.max(0, 1500 - (now - _lastFetchTime));
+      if (wait > 0) await sleep(wait);
+      _lastFetchTime = Date.now();
+      console.log('[iNat] fetch', url.replace(INAT_V1, ''));
+      const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (response.status === 429) {
+        // Respect rate-limit: back off 8 s before throwing so caller can retry
+        console.warn('[iNat] 429 rate-limited — backing off 8 s');
+        await sleep(8000);
+        throw new Error('HTTP 429 – rate limited');
+      }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      _pageCache.set(url, data);
+      return data;
+    });
+    
+    _fetchLock = fetchTask.catch(() => {});
+    return fetchTask;
   }
 
   /**
@@ -820,21 +861,17 @@
     throw new Error(`Failed to preload round ${idx+1} — no observations found after 12 attempts`);
   }
 
-  async function prefetchGameData(onProgress) {
-    prefetchedRounds = [];
-    // Fetch rounds FULLY sequentially to be as gentle as possible on iNat.
-    for (let i = 0; i < MAX_ROUNDS; i++) {
-      onProgress && onProgress(i, null); // signal "loading this round"
-      try {
-        const roundData = await preloadRound(i);
-        prefetchedRounds[i] = Promise.resolve(roundData);
-        onProgress && onProgress(i, true);
-      } catch (err) {
-        if (i === 0) throw err;
-        prefetchedRounds[i] = Promise.reject(err);
-        onProgress && onProgress(i, false);
+  function startBackgroundPrefetch() {
+    prefetchedRounds = new Array(MAX_ROUNDS).fill(null);
+    const bgFetch = async () => {
+      for (let i = 0; i < MAX_ROUNDS; i++) {
+        if (!prefetchedRounds[i]) {
+          prefetchedRounds[i] = preloadRound(i);
+        }
+        try { await prefetchedRounds[i]; } catch (e) {}
       }
-    }
+    };
+    bgFetch();
   }
 
   async function loadRound(idx) {
@@ -958,11 +995,11 @@
       const entry = { name: playerName, score, code: gameCode };
       let isNewHS = false;
 
-      // Record score for each active species (mixed game records for each species played)
-      for (const sp of activeSpecies) {
-        const r = insertScore(sp, { ...entry });
-        if (r !== -1) isNewHS = true;
-      }
+      // Record score for the exact current selection combination
+      const selMode = getModeKey(activeSpecies);
+      const r1 = insertScore(selMode, { ...entry });
+      if (r1 !== -1) isNewHS = true;
+
       const overallRank = insertScore('overall', { ...entry });
       if (overallRank !== -1) isNewHS = true;
 
@@ -998,23 +1035,12 @@
 
     const origText = startBtn.textContent;
     startBtn.disabled = true;
-    startBtn.textContent = 'Loading round 1/5…';
-    let loadedCount = 0;
+    startBtn.textContent = 'Loading round 1…';
 
-    const onProgress = (roundIdx, ok) => {
-      if (ok === true) loadedCount++;
-      if (ok === null) {
-        // Starting to load this round
-        startBtn.textContent = `Loading round ${roundIdx + 1}/${MAX_ROUNDS}…`;
-      } else if (roundIdx < MAX_ROUNDS - 1) {
-        startBtn.textContent = `Loading round ${roundIdx + 2}/${MAX_ROUNDS}…`;
-      } else {
-        startBtn.textContent = `All ${MAX_ROUNDS} rounds ready!`;
-      }
-    };
+    startBackgroundPrefetch();
 
     try {
-      await prefetchGameData(onProgress);
+      await prefetchedRounds[0];
     } catch (err) {
       alert(`Could not start game: ${err.message}`);
       startBtn.disabled = false;
