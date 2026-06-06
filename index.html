@@ -1188,6 +1188,26 @@
     bgFetch();
   }
 
+  function withStopwatch(text, promise) {
+    const startTime = Date.now();
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      loadingEl.textContent = `${text} (${(elapsed / 1000).toFixed(1)}s)`;
+    }, 100);
+    loadingEl.textContent = `${text} (0.0s)`;
+    return promise.finally(() => clearInterval(interval));
+  }
+
+  function withCountdown(text, ms, promise) {
+    const startTime = Date.now();
+    const interval = setInterval(() => {
+      const left = Math.max(0, ms - (Date.now() - startTime));
+      loadingEl.textContent = `${text} (${(left / 1000).toFixed(1)}s)`;
+    }, 100);
+    loadingEl.textContent = `${text} (${(ms / 1000).toFixed(1)}s)`;
+    return promise.finally(() => clearInterval(interval));
+  }
+
   async function loadRound(idx) {
     const MAX_RETRIES = 5;
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
@@ -1220,35 +1240,32 @@
           }
 
           if (!isReady) {
-            loadingEl.textContent = 'Fetching data…';
             if (!prefetchedRounds[idx]) {
               prefetchedRounds[idx] = preloadRound(idx);
             }
+            roundData = await withStopwatch('Fetching data…', prefetchedRounds[idx]);
+          } else {
+            roundData = await prefetchedRounds[idx];
           }
-
-          let roundData = await prefetchedRounds[idx];
           currentSpecies = roundData.species;
           currentPet = { lat: roundData.lat, lng: roundData.lng };
 
           // ── Step 2: download the image ──
-          loadingEl.textContent = 'Loading image…';
           let imgElement = null;
 
-          for (let t = 0; t < 2 && !imgElement; t++) {
-            try { imgElement = await loadImage(roundData.imageUrl, 3500); }
+          for (let t = 0; t < 1 && !imgElement; t++) {
+            try { imgElement = await withCountdown('Loading image…', 1500, loadImage(roundData.imageUrl, 1500)); }
             catch { /* continue */ }
           }
 
           if (!imgElement) {
-            console.warn('[image] URL failed twice, fetching fresh observation…');
-            loadingEl.textContent = 'Skipping…';
+            console.warn('[image] URL failed, fetching fresh observation…');
             prefetchedRounds[idx] = null;
             prefetchedRounds[idx] = preloadRound(idx);
-            roundData = await prefetchedRounds[idx];
+            roundData = await withStopwatch('Fetching new animal…', prefetchedRounds[idx]);
             currentSpecies = roundData.species;
             currentPet = { lat: roundData.lat, lng: roundData.lng };
-            loadingEl.textContent = 'Loading image…';
-            try { imgElement = await loadImage(roundData.imageUrl, 3500); }
+            try { imgElement = await withCountdown('Loading fallback image…', 2000, loadImage(roundData.imageUrl, 2000)); }
             catch { throw new Error('Image failed after fallback observation'); }
           }
 
@@ -1272,8 +1289,7 @@
         }
 
         if (attempt < MAX_RETRIES - 1) {
-          loadingEl.textContent = 'Failed to load. Retrying…';
-          await sleep(500);
+          await withCountdown('Failed. Retrying in', 500, sleep(500));
         }
       }
     }
