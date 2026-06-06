@@ -274,7 +274,7 @@
       <div class="settings">
         <label><input type="checkbox" id="check-cats" checked> Cats 🐱</label>
         <label><input type="checkbox" id="check-dogs" checked> Dogs 🐶</label>
-        <label><input type="checkbox" id="check-pigeons" checked> Feral Pigeons 🐦</label>
+        <label><input type="checkbox" id="check-pigeons" checked> Pigeons 🐦</label>
         <label><input type="checkbox" id="check-goats" checked> Goats 🐐</label>
       </div>
 
@@ -508,11 +508,14 @@
     }).join('');
   }
 
-  /** Build lb columns HTML for the given species list + overall. */
+  /** Build lb columns HTML for the given species list + overall.
+   *  Only shows a species column if that species has at least one score recorded. */
   function buildLbCols(container, speciesList, newEntry) {
     container.innerHTML = '';
-    // One column per active species
+    // One column per selected species that has scores
     for (const sp of speciesList) {
+      const entries = loadLB(sp);
+      if (!entries.length) continue; // skip empty leaderboards
       const a = ANIMALS[sp];
       const col = document.createElement('div');
       col.className = 'lb-col';
@@ -682,16 +685,30 @@
   // Fetch — uses the iNaturalist v2 API with specific fields to get photos
   // Uses fetch with CORS (iNat supports it). Falls back on page offset on error.
   // ─────────────────────────────────────────────────────────────────────────
-  const INAT_V2 = 'https://api.inaturalist.org/v2/observations';
+  const INAT_V1 = 'https://api.inaturalist.org/v1/observations';
 
   // Simple page-level cache so retries never re-fetch the same API page.
   const _pageCache = new Map();
 
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+  // Global rate-limiter: enforce ≥1500ms between API requests to stay well
+  // within iNaturalist's ~1 req/sec guideline and avoid IP blocks.
+  let _lastFetchTime = 0;
   async function apiFetch(url) {
     if (_pageCache.has(url)) return _pageCache.get(url);
+    const now  = Date.now();
+    const wait = Math.max(0, 1500 - (now - _lastFetchTime));
+    if (wait > 0) await sleep(wait);
+    _lastFetchTime = Date.now();
+    console.log('[iNat] fetch', url.replace(INAT_V1, ''));
     const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (response.status === 429) {
+      // Respect rate-limit: back off 8 s before throwing so caller can retry
+      console.warn('[iNat] 429 rate-limited — backing off 8 s');
+      await sleep(8000);
+      throw new Error('HTTP 429 – rate limited');
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     _pageCache.set(url, data);
@@ -714,18 +731,15 @@
         img2.onerror = () => reject(new Error('Image failed to load'));
         img2.src = url + (url.includes('?') ? '&' : '?') + '_nocors=1';
       };
-      // Cache-bust slightly different per attempt to avoid browser cached failures
       img.src = url;
     });
   }
 
   /**
-   * Extract a usable photo URL from an iNat v2 photo object.
+   * Extract a usable photo URL from an iNat v1 photo object.
    * Prefer large, fall back to medium or original.
    */
   function photoUrl(photo) {
-    // v2 API returns photo.url as the square thumbnail
-    // We replace the size suffix to get large
     if (!photo || !photo.url) return null;
     return photo.url
       .replace('/square.', '/large.')
@@ -734,49 +748,92 @@
       .replace('/small.', '/large.');
   }
 
-  async function preloadRound(idx) {
-    if (idx >= MAX_ROUNDS) return;
+  /**
+   * Try to extract a valid observation from one API page.
+   * Returns a roundData object or null if nothing usable.
+   */
+  async function tryPage(plan, page) {
+    const taxonId = ANIMALS[plan.species].taxonId;
+    const url = `${INAT_V1}?taxon_id=${taxonId}&has_photos=true&quality_grade=research&verifiable=true&spam=false&per_page=100&page=${page}`;
 
-    let pageOffset = 0;
-    while (pageOffset < 8) {
-      try {
-        const plan    = roundPlan[idx];
-        const taxonId = ANIMALS[plan.species].taxonId;
-        const page    = plan.page + pageOffset;
+    const data     = await apiFetch(url);
+    const results  = data.results || [];
+    const validObs = results.filter(o =>
+      o.location && o.photos && o.photos.length > 0 &&
+      o.photos[0] && o.photos[0].url
+    );
+    console.log(`[iNat] page ${page} for ${plan.species}: ${results.length} results, ${validObs.length} valid`);
 
-        // iNat v2 API with explicit fields — returns only what we need, CORS-friendly
-        const url = `${INAT_V2}?taxon_id=${taxonId}&has_photos=true&geoprivacy=open&per_page=50&page=${page}&fields=location,photos`;
+    if (!validObs.length) return null;
 
-        const data     = await apiFetch(url);
-        const results  = data.results || [];
-        const validObs = results.filter(o => o.location && o.photos && o.photos.length > 0);
+    const obs    = validObs[Math.floor(plan.pick * validObs.length) % validObs.length];
+    const imgUrl = photoUrl(obs.photos[0]);
+    if (!imgUrl) return null;
 
-        if (!validObs.length) { pageOffset++; continue; }
+    const [lat, lng] = obs.location.split(',').map(Number);
+    if (isNaN(lat) || isNaN(lng)) return null;
 
-        const obs = validObs[Math.floor(plan.pick * validObs.length) % validObs.length];
-        const imgUrl = photoUrl(obs.photos[0]);
-        if (!imgUrl) { pageOffset++; continue; }
-
-        const [lat, lng] = obs.location.split(',').map(Number);
-        if (isNaN(lat) || isNaN(lng)) { pageOffset++; continue; }
-
-        const roundData = { species: plan.species, imageUrl: imgUrl, lat, lng };
-        roundData.imgElement = await preloadImage(imgUrl);
-        return roundData;
-
-      } catch (err) {
-        console.warn(`Preload failed for round ${idx+1}, offset ${pageOffset}:`, err);
-        pageOffset++;
-        await sleep(1200);
-      }
-    }
-    throw new Error(`Failed to preload round ${idx+1}`);
+    const roundData = { species: plan.species, imageUrl: imgUrl, lat, lng };
+    roundData.imgElement = await preloadImage(imgUrl);
+    return roundData;
   }
 
-  async function prefetchGameData() {
+  async function preloadRound(idx) {
+    if (idx >= MAX_ROUNDS) return;
+    const plan = roundPlan[idx];
+
+    // Phase 1: try the deterministic page + offsets (up to 6 attempts)
+    for (let off = 0; off < 6; off++) {
+      try {
+        const page = ((plan.page + off - 1) % 100) + 1;
+        const rd = await tryPage(plan, page);
+        if (rd) return rd;
+        // No valid observations — wait before trying next page offset
+        await sleep(1200);
+      } catch (err) {
+        console.warn(`[iNat] Round ${idx+1} offset ${off} error:`, err.message);
+        // On 429 or network error, wait extra long
+        await sleep(err.message.includes('429') ? 6000 : 2000);
+      }
+    }
+
+    // Phase 2: fallback — try a few random low pages (most observations live on pages 1-20)
+    console.warn(`[iNat] Round ${idx+1} deterministic pages exhausted, trying fallback pages…`);
+    const fallbackPages = [1, 2, 3, 5, 8, 13];
+    for (const page of fallbackPages) {
+      try {
+        const rd = await tryPage(plan, page);
+        if (rd) return rd;
+        await sleep(1200);
+      } catch (err) {
+        console.warn(`[iNat] Round ${idx+1} fallback page ${page} error:`, err.message);
+        await sleep(err.message.includes('429') ? 6000 : 2000);
+      }
+    }
+
+    throw new Error(`Failed to preload round ${idx+1} — no observations found after 12 attempts`);
+  }
+
+  async function prefetchGameData(onProgress) {
     prefetchedRounds = [];
-    prefetchedRounds[0] = preloadRound(0);
-    await prefetchedRounds[0]; // Wait only for the first round before starting
+    // Fetch rounds FULLY sequentially to be as gentle as possible on iNat.
+    // This avoids any risk of parallel requests and IP blocks.
+    for (let i = 0; i < MAX_ROUNDS; i++) {
+      onProgress && onProgress(i, null); // signal "loading this round"
+      try {
+        const roundData = await preloadRound(i);
+        prefetchedRounds[i] = Promise.resolve(roundData);
+        onProgress && onProgress(i, true);
+      } catch (err) {
+        // If round 0 fails, we can't start — propagate the error.
+        if (i === 0) throw err;
+        // For later rounds, store the rejection so loadRound can retry at play time.
+        prefetchedRounds[i] = Promise.reject(err);
+        onProgress && onProgress(i, false);
+      }
+      // Generous courtesy gap between rounds to avoid burst / IP block
+      if (i < MAX_ROUNDS - 1) await sleep(1500);
+    }
   }
 
   async function loadRound(idx) {
@@ -798,15 +855,7 @@
 
       await renderPetWithBlur(roundData.imgElement);
 
-      // Start preloading the next one: always wait 2.5s before hitting the API
-      if (idx + 1 < MAX_ROUNDS) {
-        if (!prefetchedRounds[idx + 1]) {
-          prefetchedRounds[idx + 1] = new Promise((resolve, reject) => {
-            sleep(2500).then(() => preloadRound(idx + 1)).then(resolve).catch(reject);
-          });
-          prefetchedRounds[idx + 1].catch(() => {}); // prevent unhandled rejection
-        }
-      }
+      // Prefetching is now handled upfront in prefetchGameData; nothing to do here.
 
     } catch (err) {
       console.error('Round load failed:', err);
@@ -948,10 +997,23 @@
 
     const origText = startBtn.textContent;
     startBtn.disabled = true;
-    startBtn.textContent = 'Loading Game Data...';
+    startBtn.textContent = 'Loading round 1/5…';
+    let loadedCount = 0;
+
+    const onProgress = (roundIdx, ok) => {
+      if (ok === true) loadedCount++;
+      if (ok === null) {
+        // Starting to load this round
+        startBtn.textContent = `Loading round ${roundIdx + 1}/${MAX_ROUNDS}…`;
+      } else if (roundIdx < MAX_ROUNDS - 1) {
+        startBtn.textContent = `Loading round ${roundIdx + 2}/${MAX_ROUNDS}…`;
+      } else {
+        startBtn.textContent = `All ${MAX_ROUNDS} rounds ready!`;
+      }
+    };
 
     try {
-      await prefetchGameData();
+      await prefetchGameData(onProgress);
     } catch (err) {
       alert(`Could not start game: ${err.message}`);
       startBtn.disabled = false;
