@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Petguesser</title>
-  <meta name="description" content="Guess where photos of cats and dogs were taken around the world!" />
+  <meta name="description" content="Guess where photos of cats, dogs, pigeons and goats were taken around the world!" />
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -87,9 +87,9 @@
     #code-join-input::placeholder { font-family: inherit; letter-spacing: 0; color: var(--muted); font-size: .8rem; }
 
     /* ── Settings ────────────────────────────────────────────────────────── */
-    .settings { display: flex; gap: 8px; margin-bottom: 1rem; }
+    .settings { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 1rem; }
     .settings label {
-      flex: 1; cursor: pointer; display: flex; align-items: center; justify-content: center;
+      flex: 1; min-width: calc(50% - 4px); cursor: pointer; display: flex; align-items: center; justify-content: center;
       gap: 7px; background: var(--surf2); padding: 9px 8px; border-radius: 9px;
       border: 1px solid var(--border); transition: border-color .2s; font-size: .9rem; user-select: none;
     }
@@ -245,7 +245,7 @@
   <div id="menu-screen" class="screen">
     <div class="card">
       <h1>Petguesser 🐾</h1>
-      <p class="subtitle">Guess where pets were spotted around the world!</p>
+      <p class="subtitle">Guess where animals were spotted around the world!</p>
 
       <!-- Name (required) -->
       <div class="name-row">
@@ -270,32 +270,19 @@
         </div>
       </div>
 
-      <!-- Pet type -->
+      <!-- Animal type -->
       <div class="settings">
         <label><input type="checkbox" id="check-cats" checked> Cats 🐱</label>
         <label><input type="checkbox" id="check-dogs" checked> Dogs 🐶</label>
+        <label><input type="checkbox" id="check-pigeons" checked> Feral Pigeons 🐦</label>
+        <label><input type="checkbox" id="check-goats" checked> Goats 🐐</label>
       </div>
 
       <!-- Leaderboard -->
       <div class="slabel">🏅 High Scores — Top 10</div>
       <div class="lb-wrap">
-        <div class="lb-cols">
-          <div class="lb-col">
-            <div class="lb-col-hd">🐱 Cats</div>
-            <div class="lb-col-body" id="lb-cat"></div>
-          </div>
-          <div class="lb-col">
-            <div class="lb-col-hd">🐶 Dogs</div>
-            <div class="lb-col-body" id="lb-dog"></div>
-          </div>
-          <div class="lb-col">
-            <div class="lb-col-hd">🐾 Both</div>
-            <div class="lb-col-body" id="lb-both"></div>
-          </div>
-          <div class="lb-col overall">
-            <div class="lb-col-hd">🏆 Overall</div>
-            <div class="lb-col-body" id="lb-overall"></div>
-          </div>
+        <div class="lb-cols" id="menu-lb-cols">
+          <!-- dynamically populated -->
         </div>
       </div>
 
@@ -320,8 +307,8 @@
 
     <main>
       <div id="image-container">
-        <div id="loading">Loading cute pet…</div>
-        <canvas id="cat-canvas" aria-label="Where is this pet?"></canvas>
+        <div id="loading">Loading…</div>
+        <canvas id="cat-canvas" aria-label="Where is this animal?"></canvas>
         <div id="blur-badge">🫥 Faces blurred</div>
       </div>
       <div id="map-container">
@@ -348,23 +335,8 @@
 
       <div class="slabel">🏅 High Scores — Top 10</div>
       <div class="lb-wrap">
-        <div class="lb-cols">
-          <div class="lb-col">
-            <div class="lb-col-hd">🐱 Cats</div>
-            <div class="lb-col-body" id="end-lb-cat"></div>
-          </div>
-          <div class="lb-col">
-            <div class="lb-col-hd">🐶 Dogs</div>
-            <div class="lb-col-body" id="end-lb-dog"></div>
-          </div>
-          <div class="lb-col">
-            <div class="lb-col-hd">🐾 Both</div>
-            <div class="lb-col-body" id="end-lb-both"></div>
-          </div>
-          <div class="lb-col overall">
-            <div class="lb-col-hd">🏆 Overall</div>
-            <div class="lb-col-body" id="end-lb-overall"></div>
-          </div>
+        <div class="lb-cols" id="end-lb-cols">
+          <!-- dynamically populated -->
         </div>
       </div>
 
@@ -387,10 +359,18 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
 <script>
   // ─────────────────────────────────────────────────────────────────────────
-  // Constants
+  // Animal definitions
   // ─────────────────────────────────────────────────────────────────────────
+  const ANIMALS = {
+    cat:    { taxonId: 118552,  label: 'Cats',    emoji: '🐱', puns: { g:'Purr-fect Guess! 🐱', o:'Claw-some effort! 😸', b:'Cat-astrophe! 🙀' } },
+    dog:    { taxonId: 47144,   label: 'Dogs',    emoji: '🐶', puns: { g:'Paw-some Guess! 🐶',  o:'Fetching effort! 🐕',  b:'Ruff miss… 🐩' } },
+    pigeon: { taxonId: 4849,    label: 'Feral Pigeons', emoji: '🐦', puns: { g:'Coo-l Guess! 🐦',     o:'Almost landed it! 🕊️', b:'Bird-brained! 😅' } },
+    goat:   { taxonId: 42394,   label: 'Goats',   emoji: '🐐', puns: { g:'GOAT Guess! 🐐',      o:'Pretty ba-a-ad! 🐐',   b:'Utter miss! 😬' } },
+  };
+  // All possible leaderboard mode keys (single animals + 'overall')
+  const ALL_MODES = ['cat', 'dog', 'pigeon', 'goat', 'overall'];
+
   const MAX_ROUNDS = 5;
-  const MODES      = ['cat','dog','both','overall'];
   const MODEL_URL  = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
   const ALPHABET   = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
@@ -439,13 +419,13 @@
     return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return (s >>> 0) / 4294967296; };
   }
 
-  /** Pre-generate all round parameters deterministically from code + mode. */
-  function buildRoundPlan(code, mode) {
+  /** Pre-generate all round parameters deterministically from code + active species list. */
+  function buildRoundPlan(code, speciesList) {
     const rng = mkRng(codeToSeed(code));
     return Array.from({ length: MAX_ROUNDS }, () => ({
-      species: mode === 'both' ? (rng() < .5 ? 'cat' : 'dog') : mode,
-      page:    Math.floor(rng() * 100) + 1,  // iNaturalist page 1-100
-      pick:    rng(),                          // fraction 0-1 → observation index
+      species: speciesList[Math.floor(rng() * speciesList.length)],
+      page:    Math.floor(rng() * 50) + 1,  // iNaturalist page 1-50 (v2 safer range)
+      pick:    rng(),                         // fraction 0-1 → observation index
     }));
   }
 
@@ -457,22 +437,22 @@
   // ─────────────────────────────────────────────────────────────────────────
   // Game state
   // ─────────────────────────────────────────────────────────────────────────
-  let currentRound   = 1;
-  let score          = 0;
-  let gameMode       = 'both';
-  let currentSpecies = 'cat';
-  let currentPet     = null;
-  let roundPlan      = [];
+  let currentRound     = 1;
+  let score            = 0;
+  let activeSpecies    = ['cat','dog','pigeon','goat']; // species used in current game
+  let currentSpecies   = 'cat';
+  let currentPet       = null;
+  let roundPlan        = [];
   let prefetchedRounds = [];
-  let gameCode       = genCode();
-  let isReplay       = false;
-  let playerName     = sessionStorage.getItem('pg_name') || '';
-  let userMarker     = null;
-  let actualMarker   = null;
-  let polylineLine   = null;
-  let map            = null;
-  let faceModelReady = false;
-  let isImageLoaded  = false;
+  let gameCode         = genCode();
+  let isReplay         = false;
+  let playerName       = sessionStorage.getItem('pg_name') || '';
+  let userMarker       = null;
+  let actualMarker     = null;
+  let polylineLine     = null;
+  let map              = null;
+  let faceModelReady   = false;
+  let isImageLoaded    = false;
 
   // ─────────────────────────────────────────────────────────────────────────
   // DOM refs
@@ -503,9 +483,11 @@
   const finalScoreEl  = document.getElementById('final-score');
   const hsMsgEl       = document.getElementById('hs-msg');
   const replayBanner  = document.getElementById('replay-banner');
+  const menuLbCols    = document.getElementById('menu-lb-cols');
+  const endLbCols     = document.getElementById('end-lb-cols');
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Leaderboard rendering
+  // Leaderboard rendering — only shows columns for active species + overall
   // ─────────────────────────────────────────────────────────────────────────
   function renderCol(bodyEl, mode, newEntry) {
     const entries = loadLB(mode);
@@ -526,13 +508,35 @@
     }).join('');
   }
 
+  /** Build lb columns HTML for the given species list + overall. */
+  function buildLbCols(container, speciesList, newEntry) {
+    container.innerHTML = '';
+    // One column per active species
+    for (const sp of speciesList) {
+      const a = ANIMALS[sp];
+      const col = document.createElement('div');
+      col.className = 'lb-col';
+      const body = document.createElement('div');
+      body.className = 'lb-col-body';
+      col.innerHTML = `<div class="lb-col-hd">${a.emoji} ${a.label}</div>`;
+      col.appendChild(body);
+      container.appendChild(col);
+      renderCol(body, sp, newEntry);
+    }
+    // Overall column always shown
+    const overall = document.createElement('div');
+    overall.className = 'lb-col overall';
+    const obody = document.createElement('div');
+    obody.className = 'lb-col-body';
+    overall.innerHTML = '<div class="lb-col-hd">🏆 Overall</div>';
+    overall.appendChild(obody);
+    container.appendChild(overall);
+    renderCol(obody, 'overall', newEntry);
+  }
+
   function renderAllLBs(newEntry = null) {
-    MODES.forEach(m => {
-      const a = document.getElementById(`lb-${m}`);
-      const b = document.getElementById(`end-lb-${m}`);
-      if (a) renderCol(a, m, newEntry);
-      if (b) renderCol(b, m, newEntry);
-    });
+    buildLbCols(menuLbCols, activeSpecies, newEntry);
+    buildLbCols(endLbCols,  activeSpecies, newEntry);
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -565,6 +569,23 @@
   codeJoinInput.addEventListener('keydown', e => {
     if (e.key === 'Enter') document.getElementById('code-join-btn').click();
   });
+
+  // Update leaderboard preview when checkboxes change
+  ['check-cats','check-dogs','check-pigeons','check-goats'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => {
+      const sps = getActiveSpecies();
+      if (sps.length) { activeSpecies = sps; renderAllLBs(); }
+    });
+  });
+
+  function getActiveSpecies() {
+    const list = [];
+    if (document.getElementById('check-cats').checked)    list.push('cat');
+    if (document.getElementById('check-dogs').checked)    list.push('dog');
+    if (document.getElementById('check-pigeons').checked) list.push('pigeon');
+    if (document.getElementById('check-goats').checked)   list.push('goat');
+    return list;
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Name → start button gate
@@ -658,10 +679,10 @@
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Fetch — uses the seeded round plan for deterministic sequences
-  // Uses JSONP to bypass CORS issues entirely, with an in-memory cache.
+  // Fetch — uses the iNaturalist v2 API with specific fields to get photos
+  // Uses fetch with CORS (iNat supports it). Falls back on page offset on error.
   // ─────────────────────────────────────────────────────────────────────────
-  const INATURALIST = 'https://api.inaturalist.org/v1/observations';
+  const INAT_V2 = 'https://api.inaturalist.org/v2/observations';
 
   // Simple page-level cache so retries never re-fetch the same API page.
   const _pageCache = new Map();
@@ -669,71 +690,84 @@
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   async function apiFetch(url) {
-    // Return cached data if available
     if (_pageCache.has(url)) return _pageCache.get(url);
-
-    try {
-      // The iNaturalist API natively supports CORS, so standard fetch works perfectly
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json'
-        }
-      });
-
-      // Handle HTTP errors (like 429 Too Many Requests or 500 Server Error)
-      if (!response.ok) {
-        throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      _pageCache.set(url, data); // Cache the successful response
-      return data;
-      
-    } catch (error) {
-      console.error('API Fetch failed:', error);
-      throw error; // This throws the error up to fetchRoundData to trigger your retry logic
-    }
+    const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    _pageCache.set(url, data);
+    return data;
   }
 
-  async function preloadImage(url) {
+  /**
+   * Load an image, trying with crossOrigin='anonymous' first (needed for canvas),
+   * then falling back to no crossOrigin (image shows but can't be drawn on canvas).
+   */
+  function preloadImage(url) {
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error('Image failed to preload'));
+      img.onerror = () => {
+        // Retry without CORS header — some iNat photos block credentialed requests
+        const img2 = new Image();
+        img2.onload = () => resolve(img2);
+        img2.onerror = () => reject(new Error('Image failed to load'));
+        img2.src = url + (url.includes('?') ? '&' : '?') + '_nocors=1';
+      };
+      // Cache-bust slightly different per attempt to avoid browser cached failures
       img.src = url;
     });
   }
 
+  /**
+   * Extract a usable photo URL from an iNat v2 photo object.
+   * Prefer large, fall back to medium or original.
+   */
+  function photoUrl(photo) {
+    // v2 API returns photo.url as the square thumbnail
+    // We replace the size suffix to get large
+    if (!photo || !photo.url) return null;
+    return photo.url
+      .replace('/square.', '/large.')
+      .replace('/medium.', '/large.')
+      .replace('/thumb.', '/large.')
+      .replace('/small.', '/large.');
+  }
+
   async function preloadRound(idx) {
     if (idx >= MAX_ROUNDS) return;
-    
+
     let pageOffset = 0;
-    while (pageOffset < 5) {
+    while (pageOffset < 8) {
       try {
-        const plan = roundPlan[idx];
-        const taxon = plan.species === 'cat' ? 'Felis%20catus' : 'Canis%20lupus%20familiaris';
-        const url   = `${INATURALIST}?taxon_name=${taxon}&has_photos=true&geoprivacy=open&per_page=200&page=${plan.page + pageOffset}`;
-        
+        const plan    = roundPlan[idx];
+        const taxonId = ANIMALS[plan.species].taxonId;
+        const page    = plan.page + pageOffset;
+
+        // iNat v2 API with explicit fields — returns only what we need, CORS-friendly
+        const url = `${INAT_V2}?taxon_id=${taxonId}&has_photos=true&geoprivacy=open&per_page=50&page=${page}&fields=location,photos`;
+
         const data     = await apiFetch(url);
-        const validObs = (data.results || []).filter(o => o.location && o.photos?.length);
-        if (!validObs.length) {
-          pageOffset++;
-          continue;
-        }
-        
-        const obs      = validObs[Math.floor(plan.pick * validObs.length) % validObs.length];
-        const imageUrl = obs.photos[0].url.replace('square','large').replace('medium','large');
+        const results  = data.results || [];
+        const validObs = results.filter(o => o.location && o.photos && o.photos.length > 0);
+
+        if (!validObs.length) { pageOffset++; continue; }
+
+        const obs = validObs[Math.floor(plan.pick * validObs.length) % validObs.length];
+        const imgUrl = photoUrl(obs.photos[0]);
+        if (!imgUrl) { pageOffset++; continue; }
+
         const [lat, lng] = obs.location.split(',').map(Number);
-        
-        const roundData = { species: plan.species, imageUrl, lat, lng };
-        roundData.imgElement = await preloadImage(roundData.imageUrl);
+        if (isNaN(lat) || isNaN(lng)) { pageOffset++; continue; }
+
+        const roundData = { species: plan.species, imageUrl: imgUrl, lat, lng };
+        roundData.imgElement = await preloadImage(imgUrl);
         return roundData;
+
       } catch (err) {
         console.warn(`Preload failed for round ${idx+1}, offset ${pageOffset}:`, err);
         pageOffset++;
-        await sleep(1000);
+        await sleep(1200);
       }
     }
     throw new Error(`Failed to preload round ${idx+1}`);
@@ -750,7 +784,7 @@
     catCanvasEl.style.display = 'none';
     blurBadgeEl.classList.remove('visible');
     loadingEl.style.display = 'block';
-    loadingEl.textContent   = 'Loading cute pet…';
+    loadingEl.textContent   = 'Loading animal…';
     mapLoadingOv.classList.remove('hidden');
     submitBtn.disabled = true;
 
@@ -763,7 +797,7 @@
       currentPet = { lat: roundData.lat, lng: roundData.lng };
 
       await renderPetWithBlur(roundData.imgElement);
-      
+
       // Start preloading the next one: always wait 2.5s before hitting the API
       if (idx + 1 < MAX_ROUNDS) {
         if (!prefetchedRounds[idx + 1]) {
@@ -773,11 +807,11 @@
           prefetchedRounds[idx + 1].catch(() => {}); // prevent unhandled rejection
         }
       }
-      
+
     } catch (err) {
       console.error('Round load failed:', err);
       loadingEl.textContent = 'Failed to load round. Retrying in 3 s…';
-      prefetchedRounds[idx] = null; // clear the failed promise to fetch a new one next time
+      prefetchedRounds[idx] = null;
       setTimeout(() => loadRound(idx), 3000);
     }
   }
@@ -812,8 +846,8 @@
     score += pts;
     scoreEl.textContent = score.toLocaleString();
 
-    const emoji   = currentSpecies === 'cat' ? '🐱' : '🐶';
-    const petIcon = L.divIcon({ html: `<div style="font-size:25px;line-height:1">${emoji}</div>`, className: 'pet-marker', iconSize: [25,25], iconAnchor: [12,25] });
+    const a = ANIMALS[currentSpecies];
+    const petIcon = L.divIcon({ html: `<div style="font-size:25px;line-height:1">${a.emoji}</div>`, className: 'pet-marker', iconSize: [25,25], iconAnchor: [12,25] });
     actualMarker = L.marker(actual, { icon: petIcon }).addTo(map);
     actualMarker.bindPopup('Actual location!').openPopup();
     polylineLine = L.polyline([guess, actual], { color:'#ff5722', weight:3, dashArray:'6,10' }).addTo(map);
@@ -824,10 +858,7 @@
     resultDist.textContent = `You were ${Math.round(dist).toLocaleString()} km away!`;
     resultPts.textContent  = `+${pts.toLocaleString()} pts`;
 
-    const puns = currentSpecies === 'cat'
-      ? { g:'Purr-fect Guess! 🐱', o:'Claw-some effort! 😸', b:'Cat-astrophe! 🙀' }
-      : { g:'Paw-some Guess! 🐶',  o:'Fetching effort! 🐕',  b:'Ruff miss… 🐩'  };
-
+    const puns = a.puns;
     if (pts > 4500)      { resultTitle.textContent = puns.g; resultTitle.style.color = 'var(--green)'; }
     else if (pts > 2000) { resultTitle.textContent = puns.o; resultTitle.style.color = '#ff9800'; }
     else                 { resultTitle.textContent = puns.b; resultTitle.style.color = '#f44336'; }
@@ -875,14 +906,19 @@
 
     if (!isReplay) {
       const entry = { name: playerName, score, code: gameCode };
-      const modeRank    = insertScore(gameMode, entry);
+      let isNewHS = false;
+
+      // Record score for each active species (mixed game records for each species played)
+      for (const sp of activeSpecies) {
+        const r = insertScore(sp, { ...entry });
+        if (r !== -1) isNewHS = true;
+      }
       const overallRank = insertScore('overall', { ...entry });
-      const isNewHS     = modeRank !== -1 || overallRank !== -1;
+      if (overallRank !== -1) isNewHS = true;
 
       hsMsgEl.classList.toggle('hidden', !isNewHS);
       if (isNewHS) newEntry = entry;
 
-      // Prevent future recordings for this code+player combo
       markPlayed(gameCode, playerName);
     } else {
       hsMsgEl.classList.add('hidden');
@@ -900,17 +936,15 @@
     playerName = n;
     sessionStorage.setItem('pg_name', playerName);
 
-    const useCats = document.getElementById('check-cats').checked;
-    const useDogs = document.getElementById('check-dogs').checked;
-    if (!useCats && !useDogs) { alert('Select at least one pet type!'); return; }
-    gameMode = useCats && useDogs ? 'both' : useCats ? 'cat' : 'dog';
+    activeSpecies = getActiveSpecies();
+    if (!activeSpecies.length) { alert('Select at least one animal type!'); return; }
 
     // Check first-try rule BEFORE the game starts
     isReplay = hasPlayed(gameCode, playerName);
     replayBanner.classList.toggle('hidden', !isReplay);
 
     // Build deterministic round sequence from the code
-    roundPlan = buildRoundPlan(gameCode, gameMode);
+    roundPlan = buildRoundPlan(gameCode, activeSpecies);
 
     const origText = startBtn.textContent;
     startBtn.disabled = true;
@@ -948,6 +982,7 @@
     endScreen.classList.add('hidden');
     gameScreen.classList.add('hidden');
     menuScreen.classList.remove('hidden');
+    activeSpecies = getActiveSpecies().length ? getActiveSpecies() : ['cat','dog','pigeon','goat'];
     renderAllLBs();
   }
 
