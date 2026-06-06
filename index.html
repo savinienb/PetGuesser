@@ -1704,6 +1704,7 @@
   function showMenu() {
     stopSurvivalDrain();
     stopTimer();
+    setCode(genCode());
     endScreen.classList.add('hidden');
     gameScreen.classList.add('hidden');
     menuScreen.classList.remove('hidden');
