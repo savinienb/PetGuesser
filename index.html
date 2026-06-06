@@ -364,8 +364,8 @@
   const ANIMALS = {
     cat:    { taxonId: 118552,  label: 'Cats',    emoji: '🐱', puns: { g:'Purr-fect Guess! 🐱', o:'Claw-some effort! 😸', b:'Cat-astrophe! 🙀' } },
     dog:    { taxonId: 47144,   label: 'Dogs',    emoji: '🐶', puns: { g:'Paw-some Guess! 🐶',  o:'Fetching effort! 🐕',  b:'Ruff miss… 🐩' } },
-    pigeon: { taxonId: 4849,    label: 'Feral Pigeons', emoji: '🐦', puns: { g:'Coo-l Guess! 🐦',     o:'Almost landed it! 🕊️', b:'Bird-brained! 😅' } },
-    goat:   { taxonId: 42394,   label: 'Goats',   emoji: '🐐', puns: { g:'GOAT Guess! 🐐',      o:'Pretty ba-a-ad! 🐐',   b:'Utter miss! 😬' } },
+    pigeon: { taxonId: 3017,    label: 'Feral Pigeons', emoji: '🐦', puns: { g:'Coo-l Guess! 🐦',     o:'Almost landed it! 🕊️', b:'Bird-brained! 😅' } },
+    goat:   { taxonId: 42348,   label: 'Goats',   emoji: '🐐', puns: { g:'GOAT Guess! 🐐',      o:'Pretty ba-a-ad! 🐐',   b:'Utter miss! 😬' } },
   };
   // All possible leaderboard mode keys (single animals + 'overall')
   const ALL_MODES = ['cat', 'dog', 'pigeon', 'goat', 'overall'];
@@ -422,11 +422,19 @@
   /** Pre-generate all round parameters deterministically from code + active species list. */
   function buildRoundPlan(code, speciesList) {
     const rng = mkRng(codeToSeed(code));
-    return Array.from({ length: MAX_ROUNDS }, () => ({
-      species: speciesList[Math.floor(rng() * speciesList.length)],
-      page:    Math.floor(rng() * 50) + 1,  // iNaturalist page 1-50 (v2 safer range)
-      pick:    rng(),                         // fraction 0-1 → observation index
-    }));
+    const speciesPages = {};
+    for (const sp of speciesList) {
+      speciesPages[sp] = Math.floor(rng() * 50) + 1;
+    }
+    return Array.from({ length: MAX_ROUNDS }, (_, i) => {
+      const species = speciesList[Math.floor(rng() * speciesList.length)];
+      return {
+        species: species,
+        page: speciesPages[species],
+        pick: rng(),
+        roundIdx: i
+      };
+    });
   }
 
   /** Generate a random 5-letter uppercase code. */
@@ -754,7 +762,7 @@
    */
   async function tryPage(plan, page) {
     const taxonId = ANIMALS[plan.species].taxonId;
-    const url = `${INAT_V1}?taxon_id=${taxonId}&has_photos=true&quality_grade=research&verifiable=true&spam=false&per_page=100&page=${page}`;
+    const url = `${INAT_V1}?taxon_id=${taxonId}&has_photos=true&quality_grade=research&verifiable=true&spam=false&per_page=200&page=${page}`;
 
     const data     = await apiFetch(url);
     const results  = data.results || [];
@@ -766,7 +774,9 @@
 
     if (!validObs.length) return null;
 
-    const obs    = validObs[Math.floor(plan.pick * validObs.length) % validObs.length];
+    let obsIndex = Math.floor(plan.pick * validObs.length);
+    obsIndex = (obsIndex + plan.roundIdx) % validObs.length;
+    const obs    = validObs[obsIndex];
     const imgUrl = photoUrl(obs.photos[0]);
     if (!imgUrl) return null;
 
@@ -785,14 +795,11 @@
     // Phase 1: try the deterministic page + offsets (up to 6 attempts)
     for (let off = 0; off < 6; off++) {
       try {
-        const page = ((plan.page + off - 1) % 100) + 1;
+        const page = ((plan.page + off - 1) % 50) + 1;
         const rd = await tryPage(plan, page);
         if (rd) return rd;
-        // No valid observations — wait before trying next page offset
-        await sleep(1200);
       } catch (err) {
         console.warn(`[iNat] Round ${idx+1} offset ${off} error:`, err.message);
-        // On 429 or network error, wait extra long
         await sleep(err.message.includes('429') ? 6000 : 2000);
       }
     }
@@ -804,7 +811,6 @@
       try {
         const rd = await tryPage(plan, page);
         if (rd) return rd;
-        await sleep(1200);
       } catch (err) {
         console.warn(`[iNat] Round ${idx+1} fallback page ${page} error:`, err.message);
         await sleep(err.message.includes('429') ? 6000 : 2000);
@@ -817,7 +823,6 @@
   async function prefetchGameData(onProgress) {
     prefetchedRounds = [];
     // Fetch rounds FULLY sequentially to be as gentle as possible on iNat.
-    // This avoids any risk of parallel requests and IP blocks.
     for (let i = 0; i < MAX_ROUNDS; i++) {
       onProgress && onProgress(i, null); // signal "loading this round"
       try {
@@ -825,14 +830,10 @@
         prefetchedRounds[i] = Promise.resolve(roundData);
         onProgress && onProgress(i, true);
       } catch (err) {
-        // If round 0 fails, we can't start — propagate the error.
         if (i === 0) throw err;
-        // For later rounds, store the rejection so loadRound can retry at play time.
         prefetchedRounds[i] = Promise.reject(err);
         onProgress && onProgress(i, false);
       }
-      // Generous courtesy gap between rounds to avoid burst / IP block
-      if (i < MAX_ROUNDS - 1) await sleep(1500);
     }
   }
 
