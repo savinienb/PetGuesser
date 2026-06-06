@@ -154,6 +154,11 @@
     .lb-escore { color: var(--gold); font-size: .65rem; font-weight: 600; }
     .lb-empty { padding: 14px 8px; text-align: center; color: var(--muted); font-size: .7rem; font-style: italic; }
 
+    /* ── Game counter ────────────────────────────────────────────────────── */
+    .game-counter { text-align: center; font-size: .75rem; color: var(--muted); margin-bottom: .9rem; }
+    .game-counter span { color: var(--accent); font-weight: 700; }
+    .game-counter.loading span { opacity: .45; }
+
     /* ── Game header ─────────────────────────────────────────────────────── */
     header {
       display: flex; align-items: center; justify-content: space-between;
@@ -246,6 +251,7 @@
     <div class="card">
       <h1>Petguesser 🐾</h1>
       <p class="subtitle">Guess where animals were spotted around the world!</p>
+      <div class="game-counter loading" id="game-counter-menu">🎮 <span id="game-count-menu">…</span> games played worldwide</div>
 
       <!-- Name (required) -->
       <div class="name-row">
@@ -331,6 +337,7 @@
         <div class="flabel">Your Score</div>
         <div class="fvalue" id="final-score">0</div>
       </div>
+      <div class="game-counter" id="game-counter-end">🎮 <span id="game-count-end">…</span> games played worldwide</div>
       <p id="hs-msg" class="hidden">🎉 New High Score! 🎉</p>
 
       <div class="slabel">🏅 High Scores — Top 10</div>
@@ -375,15 +382,73 @@
   const ALPHABET   = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Storage helpers
+  // Firebase — global shared storage
+  // ─────────────────────────────────────────────────────────────────────────
+  const FIREBASE_URL = 'https://petguesserhighscore-default-rtdb.europe-west1.firebasedatabase.app';
+
+  // In-memory mirror of Firebase data (populated async on boot)
+  let remoteData = { scores: {}, gameCount: 0 };
+
+  async function fetchRemoteData() {
+    try {
+      const res = await fetch(`${FIREBASE_URL}/data.json`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data) {
+        remoteData.scores    = data.scores    || {};
+        remoteData.gameCount = data.gameCount || 0;
+        // Sync remote scores into localStorage as a fast-load cache
+        for (const [mode, entries] of Object.entries(remoteData.scores)) {
+          localStorage.setItem(`pg_lb_${mode}`, JSON.stringify(entries.slice(0, 10)));
+        }
+      }
+      updateGameCounter();
+      renderAllLBs();
+    } catch (e) {
+      console.warn('[Firebase] fetch failed, using local cache:', e);
+    }
+  }
+
+  async function pushRemoteData() {
+    try {
+      await fetch(`${FIREBASE_URL}/data.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(remoteData)
+      });
+    } catch (e) {
+      console.warn('[Firebase] push failed:', e);
+    }
+  }
+
+  function updateGameCounter() {
+    const n = (remoteData.gameCount || 0).toLocaleString();
+    ['game-count-menu', 'game-count-end'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = n;
+    });
+    ['game-counter-menu', 'game-counter-end'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.remove('loading');
+    });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Storage helpers (read from remoteData in-memory; fall back to localStorage)
   // ─────────────────────────────────────────────────────────────────────────
   /** Load top-10 array for a mode. Each entry: { name, score, code } */
   function loadLB(mode) {
+    if (remoteData.scores && remoteData.scores[mode] && remoteData.scores[mode].length) {
+      return [...remoteData.scores[mode]];
+    }
     try { return JSON.parse(localStorage.getItem(`pg_lb_${mode}`)) || []; }
     catch { return []; }
   }
   function saveLB(mode, arr) {
-    localStorage.setItem(`pg_lb_${mode}`, JSON.stringify(arr.slice(0, 10)));
+    const top10 = arr.slice(0, 10);
+    if (!remoteData.scores) remoteData.scores = {};
+    remoteData.scores[mode] = top10;
+    localStorage.setItem(`pg_lb_${mode}`, JSON.stringify(top10));
   }
 
   /**
@@ -1037,6 +1102,11 @@
       hsMsgEl.classList.toggle('hidden', !isNewHS);
       if (isNewHS) newEntry = entry;
 
+      // Increment global game counter and push everything to Firebase
+      remoteData.gameCount = (remoteData.gameCount || 0) + 1;
+      updateGameCounter();
+      pushRemoteData(); // fire-and-forget
+
       markPlayed(gameCode, playerName);
     } else {
       hsMsgEl.classList.add('hidden');
@@ -1116,7 +1186,8 @@
   // ─────────────────────────────────────────────────────────────────────────
   setCode(genCode());
   renderAllLBs();
-  loadFaceModel(); // loads in background while user fills name
+  loadFaceModel();    // loads in background while user fills name
+  fetchRemoteData();  // pull global scores + game count from Firebase
   showMenu();
 </script>
 </body>
