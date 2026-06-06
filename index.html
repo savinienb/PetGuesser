@@ -886,7 +886,7 @@
    */
   async function tryPage(plan, page) {
     const taxonId = ANIMALS[plan.species].taxonId;
-    const url = `${INAT_V1}?taxon_id=${taxonId}&has_photos=true&quality_grade=research&verifiable=true&spam=false&per_page=200&page=${page}`;
+    const url = `${INAT_V1}?taxon_id=${taxonId}&has_photos=true&quality_grade=research&verifiable=true&spam=false&without_term_value_id=25,26,27,28&per_page=200&page=${page}`;
 
     const data     = await apiFetch(url);
     const results  = data.results || [];
