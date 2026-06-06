@@ -747,7 +747,14 @@
       if (wait > 0) await sleep(wait);
       _lastFetchTime = Date.now();
       console.log('[iNat] fetch', url.replace(INAT_V1, ''));
-      const response = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      let response;
+      try {
+        response = await fetch(url, { headers: { 'Accept': 'application/json' }, signal: controller.signal });
+      } finally {
+        clearTimeout(timeoutId);
+      }
       if (response.status === 429) {
         // Respect rate-limit: back off 8 s before throwing so caller can retry
         console.warn('[iNat] 429 rate-limited — backing off 8 s');
@@ -884,9 +891,23 @@
     submitBtn.disabled = true;
 
     try {
-      if (!prefetchedRounds[idx]) {
-        prefetchedRounds[idx] = preloadRound(idx);
+      let isReady = false;
+      if (prefetchedRounds[idx]) {
+        const state = await Promise.race([
+          prefetchedRounds[idx].then(() => 'ready').catch(() => 'error'),
+          sleep(10).then(() => 'pending')
+        ]);
+        if (state === 'ready') isReady = true;
       }
+
+      if (!isReady) {
+        loadingEl.textContent = 'Fetching data…';
+        await sleep(2000);
+        if (!prefetchedRounds[idx]) {
+          prefetchedRounds[idx] = preloadRound(idx);
+        }
+      }
+
       const roundData = await prefetchedRounds[idx];
       currentSpecies = roundData.species;
       currentPet = { lat: roundData.lat, lng: roundData.lng };
