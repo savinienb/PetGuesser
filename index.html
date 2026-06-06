@@ -200,12 +200,17 @@
       backdrop-filter: blur(10px); box-shadow: 0 1px 0 var(--border);
       z-index: 50; flex-shrink: 0; gap: 8px;
     }
+    .header-left { min-width: 0; flex: 1 1 auto; }
     .header-left h1 {
       font-size: 1.05rem; line-height: 1.1;
       background: linear-gradient(90deg,#ff8a00,#e52e71);
       -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    #player-name-display { font-size: .66rem; color: var(--muted); margin-top: 1px; }
+    #player-name-display { 
+      font-size: .66rem; color: var(--muted); margin-top: 1px; 
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
     .hcode {
       font-family: 'JetBrains Mono', monospace; font-size: .72rem; font-weight: 700;
       letter-spacing: .12em; color: var(--accent);
@@ -273,6 +278,7 @@
       .hcode { font-size: .62rem; padding: 2px 6px; }
       #game-stats { gap: .35rem; font-size: .77rem; }
       .stat { padding: 2px 8px; }
+      .score-label { display: none; }
 
       main { display: flex; flex-direction: column; }
       #image-container { position: relative; flex: 1; min-height: 0; }
@@ -363,7 +369,7 @@
       <div class="hcode" id="hcode">XXXXX</div>
       <div id="game-stats">
         <span class="stat" id="round-stat">Round <span id="round-display">1/5</span></span>
-        <span class="stat">Score: <span id="score">0</span></span>
+        <span class="stat"><span class="score-label">Score: </span><span id="score">0</span></span>
         <span id="timer-stat" class="timer-stopped">⏱ <span id="timer-display">30</span>s</span>
       </div>
     </header>
