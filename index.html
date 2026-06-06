@@ -159,6 +159,40 @@
     .game-counter span { color: var(--accent); font-weight: 700; }
     .game-counter.loading span { opacity: .45; }
 
+    /* ── Mode selector ───────────────────────────────────────────────────── */
+    .mode-selector { display: flex; gap: 7px; margin-bottom: 1rem; }
+    .mode-btn {
+      flex: 1; padding: 10px 8px; border-radius: 11px; border: 2px solid var(--border);
+      background: var(--surf2); color: var(--muted); font-size: .82rem; font-weight: 600;
+      cursor: pointer; text-align: center; transition: all .2s; line-height: 1.3;
+      box-shadow: none; font-family: inherit;
+    }
+    .mode-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--text); transform: none; background: var(--surf2); box-shadow: none; }
+    .mode-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(255,87,34,.08); }
+
+    /* ── Survival HUD ────────────────────────────────────────────────────── */
+    #survival-hud {
+      padding: 6px 14px; display: none; align-items: center; gap: 10px;
+      background: rgba(10,10,12,.92); backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border); flex-shrink: 0;
+    }
+    #survival-hud.active { display: flex; }
+    .surv-label { font-size: .68rem; font-weight: 600; color: var(--muted); white-space: nowrap; }
+    .surv-bar-wrap {
+      flex: 1; height: 12px; background: var(--surf2); border-radius: 8px;
+      overflow: hidden; border: 1px solid var(--border);
+    }
+    #surv-bar {
+      height: 100%; border-radius: 8px; width: 100%;
+      transition: width .25s linear, background .4s;
+      background: linear-gradient(90deg, #4ade80, #22c55e);
+    }
+    #surv-bar.warn  { background: linear-gradient(90deg, #fb923c, #f97316); }
+    #surv-bar.danger { background: linear-gradient(90deg, #f87171, #ef4444); animation: bar-pulse .5s infinite; }
+    @keyframes bar-pulse { 0%,100%{opacity:1} 50%{opacity:.6} }
+    #surv-time { font-size: .9rem; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--gold); }
+    #drain-rate { font-size: .62rem; color: var(--muted); white-space: nowrap; }
+
     /* ── Game header ─────────────────────────────────────────────────────── */
     header {
       display: flex; align-items: center; justify-content: space-between;
@@ -229,6 +263,7 @@
     .final-block { text-align: center; padding: .6rem 0 .9rem; }
     .final-block .flabel { color: var(--muted); font-size: .78rem; margin-bottom: 3px; }
     .final-block .fvalue { font-size: 2.6rem; font-weight: 700; }
+    .final-block.surv-block .fvalue { font-size: 2rem; color: var(--gold); }
     #hs-msg { color: var(--green); font-weight: 700; font-size: .88rem; text-align: center; margin-bottom: .9rem; animation: pulse 1.5s infinite; }
 
     /* ── Mobile ──────────────────────────────────────────────────────────── */
@@ -273,19 +308,28 @@
                autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" />
       </div>
 
-      <!-- Game code -->
-      <div class="code-block">
-        <div class="code-top">
-          <div>
-            <div class="slabel">🎮 Game Code</div>
-            <div id="code-display">ABCDE</div>
-            <div id="code-status"></div>
+      <!-- Mode selector -->
+      <div class="slabel">🎯 Game Mode</div>
+      <div class="mode-selector">
+        <button class="mode-btn active" id="mode-classic-btn">🗺️ Classic<br><span style="font-size:.7rem;font-weight:400">5 rounds · timed</span></button>
+        <button class="mode-btn" id="mode-survival-btn">⚡ Survival<br><span style="font-size:.7rem;font-weight:400">time is running out</span></button>
+      </div>
+
+      <!-- Game code (classic only) -->
+      <div id="code-section">
+        <div class="code-block">
+          <div class="code-top">
+            <div>
+              <div class="slabel">🎮 Game Code</div>
+              <div id="code-display">ABCDE</div>
+              <div id="code-status"></div>
+            </div>
+            <button class="icon" id="new-code-btn" title="Generate new code">↻</button>
           </div>
-          <button class="icon" id="new-code-btn" title="Generate new code">↻</button>
-        </div>
-        <div class="code-join-row">
-          <input id="code-join-input" type="text" placeholder="Enter friend's code…" maxlength="5" />
-          <button class="sm" id="code-join-btn">Join</button>
+          <div class="code-join-row">
+            <input id="code-join-input" type="text" placeholder="Enter friend's code…" maxlength="5" />
+            <button class="sm" id="code-join-btn">Join</button>
+          </div>
         </div>
       </div>
 
@@ -298,7 +342,7 @@
       </div>
 
       <!-- Leaderboard -->
-      <div class="slabel">🏅 High Scores — Top 10</div>
+      <div class="slabel" id="lb-label">🏅 High Scores — Top 10</div>
       <div class="lb-wrap">
         <div class="lb-cols" id="menu-lb-cols">
           <!-- dynamically populated -->
@@ -318,11 +362,18 @@
       </div>
       <div class="hcode" id="hcode">XXXXX</div>
       <div id="game-stats">
-        <span class="stat">Round <span id="round-display">1/5</span></span>
+        <span class="stat" id="round-stat">Round <span id="round-display">1/5</span></span>
         <span class="stat">Score: <span id="score">0</span></span>
         <span id="timer-stat" class="timer-stopped">⏱ <span id="timer-display">30</span>s</span>
       </div>
     </header>
+    <!-- Survival HUD (hidden in classic mode) -->
+    <div id="survival-hud">
+      <span class="surv-label">⚡ LIFE</span>
+      <div class="surv-bar-wrap"><div id="surv-bar"></div></div>
+      <span id="drain-rate"></span>
+      <span id="surv-time">0s</span>
+    </div>
     <div id="replay-banner" class="hidden">⚠️ Replay — score won't be recorded for this code</div>
 
     <main>
@@ -346,15 +397,19 @@
   <!-- ══ End ══ -->
   <div id="end-screen" class="screen hidden">
     <div class="card">
-      <h1>Game Over!</h1>
-      <div class="final-block">
+      <h1 id="end-title">Game Over!</h1>
+      <div class="final-block" id="final-block-score">
         <div class="flabel">Your Score</div>
         <div class="fvalue" id="final-score">0</div>
+      </div>
+      <div class="final-block surv-block hidden" id="final-block-surv">
+        <div class="flabel">⚡ Time Survived</div>
+        <div class="fvalue" id="final-time">0s</div>
       </div>
       <div class="game-counter" id="game-counter-end">🎮 <span id="game-count-end">…</span> games played worldwide</div>
       <p id="hs-msg" class="hidden">🎉 New High Score! 🎉</p>
 
-      <div class="slabel">🏅 High Scores — Top 10</div>
+      <div class="slabel" id="end-lb-label">🏅 High Scores — Top 10</div>
       <div class="lb-wrap">
         <div class="lb-cols" id="end-lb-cols">
           <!-- dynamically populated -->
@@ -390,6 +445,8 @@
   };
   // All possible leaderboard mode keys (single animals + 'overall')
   const ALL_MODES = ['cat', 'dog', 'pigeon', 'goat', 'overall'];
+  // Survival mode leaderboard key prefix
+  const SURV_LB_PREFIX = 'surv_';
 
   const MAX_ROUNDS = 5;
   const MODEL_URL  = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights';
@@ -401,7 +458,7 @@
   const FIREBASE_URL = 'https://petguesserhighscore-default-rtdb.europe-west1.firebasedatabase.app';
 
   // In-memory mirror of Firebase data (populated async on boot)
-  let remoteData = { scores: {}, gameCount: 0 };
+  let remoteData = { scores: {}, gameCount: 0, survScores: {} };
 
   async function fetchRemoteData() {
     try {
@@ -409,11 +466,15 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       if (data) {
-        remoteData.scores    = data.scores    || {};
-        remoteData.gameCount = data.gameCount || 0;
+        remoteData.scores     = data.scores     || {};
+        remoteData.survScores = data.survScores  || {};
+        remoteData.gameCount  = data.gameCount   || 0;
         // Sync remote scores into localStorage as a fast-load cache
         for (const [mode, entries] of Object.entries(remoteData.scores)) {
           localStorage.setItem(`pg_lb_${mode}`, JSON.stringify(entries.slice(0, 10)));
+        }
+        for (const [mode, entries] of Object.entries(remoteData.survScores)) {
+          localStorage.setItem(`pg_surv_${mode}`, JSON.stringify(entries.slice(0, 10)));
         }
       }
       updateGameCounter();
@@ -463,6 +524,29 @@
     if (!remoteData.scores) remoteData.scores = {};
     remoteData.scores[mode] = top10;
     localStorage.setItem(`pg_lb_${mode}`, JSON.stringify(top10));
+  }
+
+  /** Survival leaderboard — sorted by timeMs desc (longer survival = better) */
+  function loadSurvLB(mode) {
+    if (remoteData.survScores && remoteData.survScores[mode] && remoteData.survScores[mode].length) {
+      return [...remoteData.survScores[mode]];
+    }
+    try { return JSON.parse(localStorage.getItem(`pg_surv_${mode}`)) || []; }
+    catch { return []; }
+  }
+  function saveSurvLB(mode, arr) {
+    const top10 = arr.slice(0, 10);
+    if (!remoteData.survScores) remoteData.survScores = {};
+    remoteData.survScores[mode] = top10;
+    localStorage.setItem(`pg_surv_${mode}`, JSON.stringify(top10));
+  }
+  function insertSurvScore(mode, entry) {
+    const lb = loadSurvLB(mode);
+    lb.push(entry);
+    lb.sort((a, b) => b.score - a.score); // score = timeMs
+    const top10 = lb.slice(0, 10);
+    saveSurvLB(mode, top10);
+    return top10.findIndex(e => e.name === entry.name && e.score === entry.score);
   }
 
   /**
@@ -559,8 +643,25 @@
   let faceModelReady   = false;
   let isImageLoaded    = false;
 
+  // ── Game mode ──
+  // 'classic' | 'survival'
+  let gameMode = 'classic';
+
+  // ── Survival state ──
+  const SURV_START_PTS    = 5000;   // starting life points
+  const SURV_DRAIN_MIN    = 140;    // pts/s initial drain rate
+  const SURV_DRAIN_MAX    = 800;    // pts/s cap
+  const SURV_DRAIN_ACCEL  = 22;     // pts/s added per second of game time
+  let survLife            = SURV_START_PTS;
+  let survElapsedSec      = 0;      // total seconds survived
+  let survCurrentDrain    = SURV_DRAIN_MIN;
+  let survInterval        = null;
+  let survRoundIdx        = 0;      // increments without limit in survival
+  let survStartTime       = 0;
+  let survGuessedThisRound = false;
+
   // ── Timer ──
-  const ROUND_TIME     = 30;   // seconds per round
+  const ROUND_TIME     = 30;   // seconds per round (classic)
   let timerSecondsLeft = ROUND_TIME;
   let timerInterval    = null;
   const timerStatEl    = document.getElementById('timer-stat');
@@ -614,52 +715,65 @@
   // ─────────────────────────────────────────────────────────────────────────
   // DOM refs
   // ─────────────────────────────────────────────────────────────────────────
-  const menuScreen    = document.getElementById('menu-screen');
-  const gameScreen    = document.getElementById('game-screen');
-  const endScreen     = document.getElementById('end-screen');
-  const nameInputEl   = document.getElementById('name-input');
-  const startBtn      = document.getElementById('start-btn');
-  const codeDisplayEl = document.getElementById('code-display');
-  const codeStatusEl  = document.getElementById('code-status');
-  const codeJoinInput = document.getElementById('code-join-input');
-  const hcodeEl       = document.getElementById('hcode');
-  const scoreEl       = document.getElementById('score');
-  const roundEl       = document.getElementById('round-display');
-  const playerNameEl  = document.getElementById('player-name-display');
-  const catCanvasEl   = document.getElementById('cat-canvas');
-  const blurBadgeEl   = document.getElementById('blur-badge');
-  const loadingEl     = document.getElementById('loading');
-  const submitBtn     = document.getElementById('submit-btn');
-  const nextBtn       = document.getElementById('next-btn');
-  const resultOverlay = document.getElementById('result-overlay');
-  const resultTitle   = document.getElementById('result-title');
-  const resultDist    = document.getElementById('result-distance');
-  const resultPts     = document.getElementById('result-points');
-  const mapContainer  = document.getElementById('map-container');
-  const mapLoadingOv  = document.getElementById('map-loading-overlay');
-  const finalScoreEl  = document.getElementById('final-score');
-  const hsMsgEl       = document.getElementById('hs-msg');
-  const replayBanner  = document.getElementById('replay-banner');
-  const menuLbCols    = document.getElementById('menu-lb-cols');
-  const endLbCols     = document.getElementById('end-lb-cols');
+  const menuScreen     = document.getElementById('menu-screen');
+  const gameScreen     = document.getElementById('game-screen');
+  const endScreen      = document.getElementById('end-screen');
+  const nameInputEl    = document.getElementById('name-input');
+  const startBtn       = document.getElementById('start-btn');
+  const codeDisplayEl  = document.getElementById('code-display');
+  const codeStatusEl   = document.getElementById('code-status');
+  const codeJoinInput  = document.getElementById('code-join-input');
+  const hcodeEl        = document.getElementById('hcode');
+  const scoreEl        = document.getElementById('score');
+  const roundEl        = document.getElementById('round-display');
+  const roundStatEl    = document.getElementById('round-stat');
+  const playerNameEl   = document.getElementById('player-name-display');
+  const catCanvasEl    = document.getElementById('cat-canvas');
+  const blurBadgeEl    = document.getElementById('blur-badge');
+  const loadingEl      = document.getElementById('loading');
+  const submitBtn      = document.getElementById('submit-btn');
+  const nextBtn        = document.getElementById('next-btn');
+  const resultOverlay  = document.getElementById('result-overlay');
+  const resultTitle    = document.getElementById('result-title');
+  const resultDist     = document.getElementById('result-distance');
+  const resultPts      = document.getElementById('result-points');
+  const mapContainer   = document.getElementById('map-container');
+  const mapLoadingOv   = document.getElementById('map-loading-overlay');
+  const finalScoreEl   = document.getElementById('final-score');
+  const finalTimeEl    = document.getElementById('final-time');
+  const hsMsgEl        = document.getElementById('hs-msg');
+  const replayBanner   = document.getElementById('replay-banner');
+  const menuLbCols     = document.getElementById('menu-lb-cols');
+  const endLbCols      = document.getElementById('end-lb-cols');
+  const survivalHud    = document.getElementById('survival-hud');
+  const survBarEl      = document.getElementById('surv-bar');
+  const survTimeEl     = document.getElementById('surv-time');
+  const drainRateEl    = document.getElementById('drain-rate');
+  const codeSectionEl  = document.getElementById('code-section');
+  const lbLabelEl      = document.getElementById('lb-label');
+  const endLbLabelEl   = document.getElementById('end-lb-label');
+  const finalBlockScore= document.getElementById('final-block-score');
+  const finalBlockSurv = document.getElementById('final-block-surv');
+  const endTitleEl     = document.getElementById('end-title');
 
   // ─────────────────────────────────────────────────────────────────────────
   // Leaderboard rendering — only shows columns for active species + overall
   // ─────────────────────────────────────────────────────────────────────────
-  function renderCol(bodyEl, mode, newEntry) {
-    const entries = loadLB(mode);
+  function renderCol(bodyEl, mode, newEntry, isSurv = false) {
+    const entries = isSurv ? loadSurvLB(mode) : loadLB(mode);
     if (!entries.length) {
       bodyEl.innerHTML = '<div class="lb-empty">No scores yet</div>';
       return;
     }
     bodyEl.innerHTML = entries.map((e, i) => {
       const rc  = ['r1','r2','r3'][i] || '';
-      const isN = newEntry && e.name === newEntry.name && e.score === newEntry.score && e.code === newEntry.code;
+      const isN = newEntry && e.name === newEntry.name && e.score === newEntry.score;
+      const scoreLabel = isSurv ? fmtSurvTime(e.score) : e.score.toLocaleString();
       return `<div class="lb-entry${isN ? ' new-hs' : ''}">
         <span class="lb-rank ${rc}">${i+1}</span>
         <div class="lb-info">
           <div class="lb-ename" title="${e.name}">${e.name}</div>
-          <div class="lb-escore">${e.score.toLocaleString()}</div>
+          <div class="lb-escore">${scoreLabel}</div>
         </div>
       </div>`;
     }).join('');
@@ -681,11 +795,11 @@
   }
 
   /** Build lb columns HTML for the given species list + overall. */
-  function buildLbCols(container, speciesList, newEntry) {
+  function buildLbCols(container, speciesList, newEntry, isSurv = false) {
     container.innerHTML = '';
     
     // 1) Current Selection Column
-    const selMode = getModeKey(speciesList);
+    const selMode = (isSurv ? SURV_LB_PREFIX : '') + getModeKey(speciesList);
     const selLabel = getModeLabel(speciesList);
     
     const col1 = document.createElement('div');
@@ -695,9 +809,10 @@
     col1.innerHTML = `<div class="lb-col-hd">${selLabel}</div>`;
     col1.appendChild(body1);
     container.appendChild(col1);
-    renderCol(body1, selMode, newEntry);
+    renderCol(body1, selMode, newEntry, isSurv);
 
     // 2) Overall Column
+    const overallMode = (isSurv ? SURV_LB_PREFIX : '') + 'overall';
     const col2 = document.createElement('div');
     col2.className = 'lb-col overall';
     const body2 = document.createElement('div');
@@ -705,13 +820,43 @@
     col2.innerHTML = '<div class="lb-col-hd">🏆 Overall</div>';
     col2.appendChild(body2);
     container.appendChild(col2);
-    renderCol(body2, 'overall', newEntry);
+    renderCol(body2, overallMode, newEntry, isSurv);
   }
 
   function renderAllLBs(newEntry = null) {
-    buildLbCols(menuLbCols, activeSpecies, newEntry);
-    buildLbCols(endLbCols,  activeSpecies, newEntry);
+    const isSurv = (gameMode === 'survival');
+    buildLbCols(menuLbCols, activeSpecies, newEntry, isSurv);
+    buildLbCols(endLbCols,  activeSpecies, newEntry, isSurv);
   }
+
+  /** Format milliseconds as "1m 23s" or "45s" */
+  function fmtSurvTime(ms) {
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return `${s}s`;
+    return `${Math.floor(s/60)}m ${s%60}s`;
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Mode selector
+  // ─────────────────────────────────────────────────────────────────────────
+  document.getElementById('mode-classic-btn').addEventListener('click', () => {
+    gameMode = 'classic';
+    document.getElementById('mode-classic-btn').classList.add('active');
+    document.getElementById('mode-survival-btn').classList.remove('active');
+    codeSectionEl.style.display = '';
+    lbLabelEl.textContent = '🏅 High Scores — Top 10';
+    refreshStartBtn();
+    renderAllLBs();
+  });
+  document.getElementById('mode-survival-btn').addEventListener('click', () => {
+    gameMode = 'survival';
+    document.getElementById('mode-survival-btn').classList.add('active');
+    document.getElementById('mode-classic-btn').classList.remove('active');
+    codeSectionEl.style.display = 'none';
+    lbLabelEl.textContent = '⚡ Survival High Scores — Top 10';
+    refreshStartBtn();
+    renderAllLBs();
+  });
 
   // ─────────────────────────────────────────────────────────────────────────
   // Code helpers
@@ -767,7 +912,13 @@
   function refreshStartBtn() {
     const v = nameInputEl.value.trim();
     startBtn.disabled    = !v;
-    startBtn.textContent = v ? 'Start Game (5 Rounds)' : 'Enter your name to play';
+    if (!v) {
+      startBtn.textContent = 'Enter your name to play';
+    } else if (gameMode === 'survival') {
+      startBtn.textContent = '⚡ Start Survival Mode';
+    } else {
+      startBtn.textContent = 'Start Game (5 Rounds)';
+    }
   }
   nameInputEl.addEventListener('input', refreshStartBtn);
   nameInputEl.addEventListener('keydown', e => { if (e.key === 'Enter' && !startBtn.disabled) startBtn.click(); });
@@ -823,7 +974,12 @@
     mapLoadingOv.classList.add('hidden');
     isImageLoaded = true;
     if (userMarker) submitBtn.disabled = false;
-    startTimer(); // timer begins only after image is fully rendered
+    if (gameMode === 'survival') {
+      // In survival mode we don't use the per-round timer
+      stopTimer();
+    } else {
+      startTimer(); // timer begins only after image is fully rendered
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -985,8 +1141,10 @@
   }
 
   async function preloadRound(idx) {
-    if (idx >= MAX_ROUNDS) return;
+    // NOTE: roundPlan[idx] must be set by the caller before invoking this function
+    // (loadSurvRound always extends roundPlan before calling us)
     const plan = roundPlan[idx];
+    if (!plan) throw new Error(`No round plan for idx ${idx}`);
 
     // Phase 1: try the deterministic page + offsets (up to 6 attempts)
     for (let off = 0; off < 6; off++) {
@@ -1017,9 +1175,10 @@
   }
 
   function startBackgroundPrefetch() {
-    prefetchedRounds = new Array(MAX_ROUNDS).fill(null);
+    prefetchedRounds = new Array(MAX_ROUNDS * 10).fill(null);
     const bgFetch = async () => {
-      for (let i = 0; i < MAX_ROUNDS; i++) {
+      // Skip i=0 — the caller always sets prefetchedRounds[0] explicitly
+      for (let i = 1; i < MAX_ROUNDS; i++) {
         if (!prefetchedRounds[i]) {
           prefetchedRounds[i] = preloadRound(i);
         }
@@ -1030,58 +1189,198 @@
   }
 
   async function loadRound(idx) {
-    isImageLoaded = false;
-    catCanvasEl.style.display = 'none';
-    blurBadgeEl.classList.remove('visible');
-    loadingEl.style.display = 'block';
-    loadingEl.textContent   = 'Loading animal…';
-    mapLoadingOv.classList.remove('hidden');
-    submitBtn.disabled = true;
+    const MAX_RETRIES = 5;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      isImageLoaded = false;
+      catCanvasEl.style.display = 'none';
+      blurBadgeEl.classList.remove('visible');
+      loadingEl.style.display = 'block';
+      loadingEl.textContent   = attempt === 0 ? 'Loading animal…' : `Retrying (${attempt}/${MAX_RETRIES})…`;
+      mapLoadingOv.classList.remove('hidden');
+      submitBtn.disabled = true;
 
-    try {
-      // ── Step 1: get observation data (fast — API only, already prefetched) ──
-      let isReady = false;
-      if (prefetchedRounds[idx]) {
-        const state = await Promise.race([
-          prefetchedRounds[idx].then(() => 'ready').catch(() => 'error'),
-          sleep(10).then(() => 'pending')
-        ]);
-        if (state === 'ready') isReady = true;
-      }
+      // 20 s hard cap per attempt so we never hang silently.
+      const timeoutErr = new Error('Round load timed out');
+      timeoutErr.isTimeout = true;
+      const attemptTimeout = new Promise((_, reject) =>
+        setTimeout(() => reject(timeoutErr), 20000)
+      );
 
-      if (!isReady) {
-        loadingEl.textContent = 'Fetching data…';
-        if (!prefetchedRounds[idx]) {
-          prefetchedRounds[idx] = preloadRound(idx);
+      try {
+        await Promise.race([attemptTimeout, (async () => {
+          // ── Step 1: get observation data ──
+          let isReady = false;
+          if (prefetchedRounds[idx]) {
+            const state = await Promise.race([
+              prefetchedRounds[idx].then(() => 'ready').catch(() => 'error'),
+              sleep(10).then(() => 'pending')
+            ]);
+            if (state === 'ready') isReady = true;
+            if (state === 'error')  prefetchedRounds[idx] = null;
+          }
+
+          if (!isReady) {
+            loadingEl.textContent = 'Fetching data…';
+            if (!prefetchedRounds[idx]) {
+              prefetchedRounds[idx] = preloadRound(idx);
+            }
+          }
+
+          let roundData = await prefetchedRounds[idx];
+          currentSpecies = roundData.species;
+          currentPet = { lat: roundData.lat, lng: roundData.lng };
+
+          // ── Step 2: download the image ──
+          loadingEl.textContent = 'Loading image…';
+          let imgElement = null;
+
+          for (let t = 0; t < 2 && !imgElement; t++) {
+            try { imgElement = await loadImage(roundData.imageUrl, 4000); }
+            catch { /* continue */ }
+          }
+
+          if (!imgElement) {
+            console.warn('[image] URL failed twice, fetching fresh observation…');
+            loadingEl.textContent = 'Skipping…';
+            prefetchedRounds[idx] = null;
+            prefetchedRounds[idx] = preloadRound(idx);
+            roundData = await prefetchedRounds[idx];
+            currentSpecies = roundData.species;
+            currentPet = { lat: roundData.lat, lng: roundData.lng };
+            loadingEl.textContent = 'Loading image…';
+            try { imgElement = await loadImage(roundData.imageUrl, 6000); }
+            catch { throw new Error('Image failed after fallback observation'); }
+          }
+
+          await renderPetWithBlur(imgElement);
+        })()]);
+
+        return; // ✅ success
+
+      } catch (err) {
+        console.error(`Round load attempt ${attempt+1}/${MAX_RETRIES} failed:`, err);
+        prefetchedRounds[idx] = null;
+        _fetchLock = Promise.resolve();
+
+        // Rotate the plan's page & pick so the next attempt fetches different data
+        if (roundPlan[idx]) {
+          roundPlan[idx] = {
+            ...roundPlan[idx],
+            page: ((roundPlan[idx].page + 3 + attempt * 7) % 50) + 1,
+            pick: (roundPlan[idx].pick + 0.23 * (attempt + 1)) % 1
+          };
+        }
+
+        if (attempt < MAX_RETRIES - 1) {
+          loadingEl.textContent = 'Failed to load. Retrying…';
+          await sleep(500);
         }
       }
-
-      const roundData = await prefetchedRounds[idx];
-      currentSpecies = roundData.species;
-      currentPet = { lat: roundData.lat, lng: roundData.lng };
-
-      // ── Step 2: download the image NOW, with a generous timeout ────────────
-      // This always starts fresh here so there's no race with a background
-      // download that may have partially timed out.
-      loadingEl.textContent = 'Loading image…';
-      let imgElement;
-      try {
-        imgElement = await loadImage(roundData.imageUrl, 20000);
-      } catch (imgErr) {
-        // Image failed — retry once with a fresh load before giving up
-        console.warn('[image] first load failed, retrying…', imgErr.message);
-        loadingEl.textContent = 'Retrying image…';
-        imgElement = await loadImage(roundData.imageUrl, 20000);
-      }
-
-      await renderPetWithBlur(imgElement);
-
-    } catch (err) {
-      console.error('Round load failed:', err);
-      loadingEl.textContent = 'Failed to load round. Retrying in 3 s…';
-      prefetchedRounds[idx] = null;
-      setTimeout(() => loadRound(idx), 3000);
     }
+
+    // All retries exhausted — force-skip this round so the game isn't stuck
+    console.error(`[loadRound] All ${MAX_RETRIES} attempts for round ${idx+1} failed, force-skipping.`);
+    loadingEl.textContent = 'Skipping round…';
+    await sleep(1000);
+
+    // Set a dummy pet so the round can advance
+    currentSpecies = roundPlan[idx]?.species || activeSpecies[0];
+    currentPet = { lat: 0, lng: 0 };
+    isImageLoaded = true;
+    loadingEl.style.display = 'none';
+    mapLoadingOv.classList.add('hidden');
+
+    // Auto-advance to next round
+    if (gameMode === 'survival') {
+      nextRound();
+    } else {
+      // In classic, just show the map and let player guess blindly or skip
+      catCanvasEl.style.display = 'none';
+      loadingEl.style.display = 'block';
+      loadingEl.textContent = '⚠️ Could not load image — make your best guess!';
+      if (userMarker) submitBtn.disabled = false;
+      startTimer();
+    }
+  }
+
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Survival drain logic
+  // ─────────────────────────────────────────────────────────────────────────
+  function startSurvivalDrain() {
+    clearInterval(survInterval);
+    survStartTime = Date.now();
+    survLife = SURV_START_PTS;
+    survElapsedSec = 0;
+    survCurrentDrain = SURV_DRAIN_MIN;
+    survGuessedThisRound = false;
+    updateSurvHUD();
+
+    survInterval = setInterval(() => {
+      if (!isImageLoaded) return; // pause only while image is loading (NOT during result — keeps pressure on!)
+      survElapsedSec += 0.1;
+      // Drain rate increases over time, capped at max
+      survCurrentDrain = Math.min(SURV_DRAIN_MAX, SURV_DRAIN_MIN + SURV_DRAIN_ACCEL * survElapsedSec);
+      survLife -= survCurrentDrain * 0.1; // per 100ms tick
+
+      if (survLife <= 0) {
+        survLife = 0;
+        updateSurvHUD();
+        clearInterval(survInterval);
+        // Auto-submit if marker placed, else end immediately
+        if (userMarker && nextBtn.classList.contains('hidden')) {
+          submitGuess();
+        } else if (nextBtn.classList.contains('hidden')) {
+          endGame();
+        }
+      } else {
+        updateSurvHUD();
+      }
+    }, 100);
+  }
+
+  function stopSurvivalDrain() {
+    clearInterval(survInterval);
+  }
+
+  /** Resume survival drain without resetting life/elapsed (used between rounds). */
+  function startSurvivalResume() {
+    clearInterval(survInterval);
+    survGuessedThisRound = false;
+    survInterval = setInterval(() => {
+      if (!isImageLoaded) return; // pause while image is loading
+      survElapsedSec += 0.1;
+      survCurrentDrain = Math.min(SURV_DRAIN_MAX, SURV_DRAIN_MIN + SURV_DRAIN_ACCEL * survElapsedSec);
+      survLife -= survCurrentDrain * 0.1;
+
+      if (survLife <= 0) {
+        survLife = 0;
+        updateSurvHUD();
+        clearInterval(survInterval);
+        if (userMarker && nextBtn.classList.contains('hidden')) {
+          submitGuess();
+        } else if (nextBtn.classList.contains('hidden')) {
+          endGame();
+        }
+      } else {
+        updateSurvHUD();
+      }
+    }, 100);
+  }
+
+  function updateSurvHUD() {
+    const pct = Math.max(0, survLife / SURV_START_PTS);
+    survBarEl.style.width = (pct * 100) + '%';
+    if (pct > 0.45) {
+      survBarEl.className = '';
+    } else if (pct > 0.2) {
+      survBarEl.className = 'warn';
+    } else {
+      survBarEl.className = 'danger';
+    }
+    const totalMs = Date.now() - survStartTime;
+    survTimeEl.textContent = fmtSurvTime(totalMs);
+    drainRateEl.textContent = `−${Math.round(survCurrentDrain)}/s`;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1104,7 +1403,14 @@
   // ─────────────────────────────────────────────────────────────────────────
   function submitGuess() {
     if (!userMarker || !currentPet) return;
-    stopTimer();
+
+    if (gameMode === 'survival') {
+      survGuessedThisRound = true;
+      stopSurvivalDrain(); // Stop timer immediately on guess
+    } else {
+      stopTimer();
+    }
+
     submitBtn.classList.add('hidden');
     nextBtn.classList.remove('hidden');
 
@@ -1112,10 +1418,24 @@
     const actual = [currentPet.lat, currentPet.lng];
     const dist   = calcDist(guess.lat, guess.lng, actual[0], actual[1]);
     const basePts  = calcPoints(dist);
-    const timeBonus = calcTimeBonus();
-    const pts       = basePts + timeBonus;
-    score += pts;
-    scoreEl.textContent = score.toLocaleString();
+
+    let pts;
+    if (gameMode === 'survival') {
+      // Refill life — capped at 40% of base pts (max 2000) to prevent easy clicking exploitation
+      pts = basePts;
+      const lifeRefill = Math.min(2000, Math.round(basePts * 0.4));
+      survLife = Math.min(SURV_START_PTS, survLife + lifeRefill);
+      score += basePts;
+      scoreEl.textContent = score.toLocaleString();
+      resultPts.textContent = `+${pts.toLocaleString()} pts ⚡ +${lifeRefill.toLocaleString()} life`;
+    } else {
+      const timeBonus = calcTimeBonus();
+      pts = basePts + timeBonus;
+      score += pts;
+      scoreEl.textContent = score.toLocaleString();
+      const bonusTxt = timeBonus > 0 ? ` (+${timeBonus.toLocaleString()} speed bonus ⚡)` : '';
+      resultPts.textContent = `+${pts.toLocaleString()} pts${bonusTxt}`;
+    }
 
     const a = ANIMALS[currentSpecies];
     const petIcon = L.divIcon({ html: `<div style="font-size:25px;line-height:1">${a.emoji}</div>`, className: 'pet-marker', iconSize: [25,25], iconAnchor: [12,25] });
@@ -1127,8 +1447,6 @@
     setTimeout(() => map.invalidateSize(), 50);
 
     resultDist.textContent = `You were ${Math.round(dist).toLocaleString()} km away!`;
-    const bonusTxt = timeBonus > 0 ? ` (+${timeBonus.toLocaleString()} speed bonus ⚡)` : '';
-    resultPts.textContent  = `+${pts.toLocaleString()} pts${bonusTxt}`;
 
     const puns = a.puns;
     if (basePts > 4500)      { resultTitle.textContent = puns.g; resultTitle.style.color = 'var(--green)'; }
@@ -1136,23 +1454,39 @@
     else                     { resultTitle.textContent = puns.b; resultTitle.style.color = '#f44336'; }
 
     resultOverlay.classList.remove('hidden');
-    nextBtn.textContent = currentRound === MAX_ROUNDS ? 'View Results' : 'Next Round';
+    if (gameMode === 'survival') {
+      nextBtn.textContent = 'Next Round ▶';
+    } else {
+      nextBtn.textContent = currentRound === MAX_ROUNDS ? 'View Results' : 'Next Round';
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Round management
   // ─────────────────────────────────────────────────────────────────────────
   function nextRound() {
-    if (currentRound === MAX_ROUNDS) { endGame(); return; }
-    currentRound++;
-    roundEl.textContent = `${currentRound}/${MAX_ROUNDS}`;
-    resetRound();
-    loadRound(currentRound - 1);
+    if (gameMode === 'survival') {
+      // Check if life ran out
+      if (survLife <= 0) { endGame(); return; }
+      survRoundIdx++;
+      resetRound();
+      // Resume survival drain for the next round
+      startSurvivalResume();
+      // loadSurvRound handles plan extension + prefetch internally
+      loadSurvRound(survRoundIdx);
+    } else {
+      if (currentRound === MAX_ROUNDS) { endGame(); return; }
+      currentRound++;
+      roundEl.textContent = `${currentRound}/${MAX_ROUNDS}`;
+      resetRound();
+      loadRound(currentRound - 1);
+    }
   }
 
   function resetRound() {
     isImageLoaded = false;
-    resetTimer();
+    survGuessedThisRound = false; // allow drain to resume once next image is loaded
+    if (gameMode !== 'survival') resetTimer();
     resultOverlay.classList.add('hidden');
     mapContainer.classList.remove('expanded');
     submitBtn.classList.remove('hidden');
@@ -1168,41 +1502,97 @@
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Survival round loader (infinite rounds)
+  // ─────────────────────────────────────────────────────────────────────────
+  async function loadSurvRound(idx) {
+    // ALWAYS ensure roundPlan[idx] exists BEFORE calling preloadRound,
+    // because preloadRound now requires plan to be present.
+    if (!roundPlan[idx]) {
+      // Extend round plan: cycle existing plan with different picks
+      const basePlan = roundPlan[idx % MAX_ROUNDS];
+      roundPlan[idx] = {
+        ...basePlan,
+        page: ((basePlan.page + Math.floor(idx / MAX_ROUNDS) * 7) % 50) + 1,
+        pick: (basePlan.pick + idx * 0.137) % 1,
+        roundIdx: idx
+      };
+    }
+    if (!prefetchedRounds[idx]) {
+      prefetchedRounds[idx] = preloadRound(idx);
+    }
+    // Show round number
+    roundEl.textContent = `${idx + 1}`;
+    await loadRound(idx);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // End game — record scores, update leaderboards
   // ─────────────────────────────────────────────────────────────────────────
   function endGame() {
+    stopSurvivalDrain();
+    stopTimer();
     gameScreen.classList.add('hidden');
     endScreen.classList.remove('hidden');
-    finalScoreEl.textContent = score.toLocaleString();
 
-    let newEntry = null;
+    if (gameMode === 'survival') {
+      // Survival end screen
+      const totalMs = Date.now() - survStartTime;
+      finalBlockScore.classList.add('hidden');
+      finalBlockSurv.classList.remove('hidden');
+      finalTimeEl.textContent = fmtSurvTime(totalMs);
+      endTitleEl.textContent = "⚡ Time's Up!";
+      endLbLabelEl.textContent = '⚡ Survival Leaderboard — Top 10';
 
-    if (!isReplay) {
-      const entry = { name: playerName, score, code: gameCode };
-      let isNewHS = false;
-
-      // Record score for the exact current selection combination
-      const selMode = getModeKey(activeSpecies);
-      const r1 = insertScore(selMode, { ...entry });
-      if (r1 !== -1) isNewHS = true;
-
-      const overallRank = insertScore('overall', { ...entry });
-      if (overallRank !== -1) isNewHS = true;
-
+      const entry = { name: playerName, score: totalMs };
+      const selMode = SURV_LB_PREFIX + getModeKey(activeSpecies);
+      const r1 = insertSurvScore(selMode, { ...entry });
+      const r2 = insertSurvScore(SURV_LB_PREFIX + 'overall', { ...entry });
+      const isNewHS = r1 !== -1 || r2 !== -1;
       hsMsgEl.classList.toggle('hidden', !isNewHS);
-      if (isNewHS) newEntry = entry;
+      const newEntry = isNewHS ? entry : null;
 
-      // Increment global game counter and push everything to Firebase
       remoteData.gameCount = (remoteData.gameCount || 0) + 1;
       updateGameCounter();
-      pushRemoteData(); // fire-and-forget
+      pushRemoteData();
 
-      markPlayed(gameCode, playerName);
+      renderAllLBs(newEntry);
     } else {
-      hsMsgEl.classList.add('hidden');
-    }
+      // Classic end screen
+      finalBlockScore.classList.remove('hidden');
+      finalBlockSurv.classList.add('hidden');
+      endTitleEl.textContent = 'Game Over!';
+      endLbLabelEl.textContent = '🏅 High Scores — Top 10';
+      finalScoreEl.textContent = score.toLocaleString();
 
-    renderAllLBs(newEntry);
+      let newEntry = null;
+
+      if (!isReplay) {
+        const entry = { name: playerName, score, code: gameCode };
+        let isNewHS = false;
+
+        // Record score for the exact current selection combination
+        const selMode = getModeKey(activeSpecies);
+        const r1 = insertScore(selMode, { ...entry });
+        if (r1 !== -1) isNewHS = true;
+
+        const overallRank = insertScore('overall', { ...entry });
+        if (overallRank !== -1) isNewHS = true;
+
+        hsMsgEl.classList.toggle('hidden', !isNewHS);
+        if (isNewHS) newEntry = entry;
+
+        // Increment global game counter and push everything to Firebase
+        remoteData.gameCount = (remoteData.gameCount || 0) + 1;
+        updateGameCounter();
+        pushRemoteData(); // fire-and-forget
+
+        markPlayed(gameCode, playerName);
+      } else {
+        hsMsgEl.classList.add('hidden');
+      }
+
+      renderAllLBs(newEntry);
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1217,18 +1607,28 @@
     activeSpecies = getActiveSpecies();
     if (!activeSpecies.length) { alert('Select at least one animal type!'); return; }
 
-    // Check first-try rule BEFORE the game starts
-    isReplay = hasPlayed(gameCode, playerName);
-    replayBanner.classList.toggle('hidden', !isReplay);
+    if (gameMode === 'survival') {
+      // Survival: no code replay gate
+      isReplay = false;
+      replayBanner.classList.add('hidden');
+    } else {
+      // Check first-try rule BEFORE the game starts
+      isReplay = hasPlayed(gameCode, playerName);
+      replayBanner.classList.toggle('hidden', !isReplay);
+    }
 
     // Build deterministic round sequence from the code
-    roundPlan = buildRoundPlan(gameCode, activeSpecies);
+    const codeForPlan = gameMode === 'survival' ? genCode() : gameCode;
+    roundPlan = buildRoundPlan(codeForPlan, activeSpecies);
 
     const origText = startBtn.textContent;
     startBtn.disabled = true;
     startBtn.textContent = 'Loading round 1…';
 
-    startBackgroundPrefetch();
+    // startBackgroundPrefetch resets the array; set prefetchedRounds[0] after it
+    // so round 0 is guaranteed non-null when we await it (fixes "stuck loading" race).
+    startBackgroundPrefetch(); // initialises array + prefetches rounds 1-4
+    prefetchedRounds[0] = preloadRound(0); // explicit round-0 kick-off, always non-null
 
     try {
       await prefetchedRounds[0];
@@ -1239,14 +1639,35 @@
       return;
     }
 
+    // Kick off image preload immediately in background to reduce first-round wait
+    prefetchedRounds[0].then(rd => {
+      if (rd && rd.imageUrl) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.src = rd.imageUrl;
+      }
+    }).catch(() => {});
+
     startBtn.disabled = false;
     startBtn.textContent = origText;
 
-    score = 0; currentRound = 1;
+    score = 0; currentRound = 1; survRoundIdx = 0;
     scoreEl.textContent = '0';
-    roundEl.textContent = `1/${MAX_ROUNDS}`;
     playerNameEl.textContent = `Playing as ${playerName}`;
-    hcodeEl.textContent = gameCode;
+    hcodeEl.textContent = gameMode === 'survival' ? '⚡ SURVIVAL' : gameCode;
+
+    // HUD setup
+    if (gameMode === 'survival') {
+      survivalHud.classList.add('active');
+      roundStatEl.style.display = 'none';
+      timerStatEl.style.display = 'none';
+      roundEl.textContent = '1';
+    } else {
+      survivalHud.classList.remove('active');
+      roundStatEl.style.display = '';
+      timerStatEl.style.display = '';
+      roundEl.textContent = `1/${MAX_ROUNDS}`;
+    }
 
     menuScreen.classList.add('hidden');
     endScreen.classList.add('hidden');
@@ -1255,13 +1676,24 @@
     initMap();
     setTimeout(() => map && map.invalidateSize(), 120);
     resetRound();
-    loadRound(0);
+
+    if (gameMode === 'survival') {
+      startSurvivalDrain();
+      loadSurvRound(0);
+    } else {
+      loadRound(0);
+    }
   });
 
   function showMenu() {
+    stopSurvivalDrain();
+    stopTimer();
     endScreen.classList.add('hidden');
     gameScreen.classList.add('hidden');
     menuScreen.classList.remove('hidden');
+    survivalHud.classList.remove('active');
+    roundStatEl.style.display = '';
+    timerStatEl.style.display = '';
     activeSpecies = getActiveSpecies().length ? getActiveSpecies() : ['cat','dog','pigeon','goat'];
     renderAllLBs();
   }
